@@ -1,0 +1,8 @@
+model_name: resnet18
+batch_size: 64
+epochs: 25
+learning_rate: 0.0003
+num_classes: 7
+input_size: 224
+checkpoint_path: checkpoints/emotion_model.pth
+use_gpu: true
