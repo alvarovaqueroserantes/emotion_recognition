@@ -6,79 +6,76 @@ Detect emotions from facial images using deep learning. This project is based on
 
 ## 📁 Project Structure
 
-emotion_recognition/
-├── configs/ # YAML configuration
-├── data/ # Place for fer2013.csv
-├── models/ # CNN architecture
-├── utils/ # Helpers, dataset, metrics
-├── train.py # Training logic
-├── test.py # Final evaluation
-├── main.py # Entry point
+emotion\_recognition/
+├── configs/             # YAML configuration
+├── data/                # Place for fer2013.csv
+├── models/              # CNN architecture
+├── utils/               # Helpers, dataset, metrics
+├── train.py             # Training logic
+├── test.py              # Final evaluation
+├── main.py              # Entry point
 ├── requirements.txt
 └── README.md
-
-yaml
-Copiar
-Editar
 
 ---
 
 ## 🔧 Setup
 
-1. **Clone the repo:**
+### Create virtual environment (optional):
 
 ```bash
-git clone https://github.com/tu_usuario/emotion_recognition.git
-cd emotion_recognition
-Create virtual environment (optional):
-
-bash
-Copiar
-Editar
 python -m venv venv
 source venv/bin/activate
-Install requirements:
+```
 
-bash
-Copiar
-Editar
+### Install requirements:
+
+```bash
 pip install -r requirements.txt
-Download dataset:
+```
 
-Coloca manualmente el archivo fer2013.csv en la carpeta data/.
+### Download dataset:
+
+Coloca manualmente el archivo `fer2013.csv` en la carpeta `data/`.
 
 O usa el script:
 
-bash
-Copiar
-Editar
+```bash
 python utils/download_kaggle.py
-🚀 Training
-bash
-Copiar
-Editar
+```
+
+---
+
+## 🚀 Training
+
+```bash
 python main.py
-Para configurar hiperparámetros, edita configs/config.yaml.
+```
 
-📊 Visualize
-bash
-Copiar
-Editar
+Para configurar hiperparámetros, edita `configs/config.yaml`.
+
+---
+
+## 📊 Visualize
+
+```bash
 tensorboard --logdir runs/
-📈 Results
-Accuracy y F1 en cada epoch
+```
 
-Matriz de confusión final
+---
 
-Compatible con GPU y checkpoints
+## 📈 Results
 
-📚 Dataset
+* Accuracy y F1 en cada epoch
+* Matriz de confusión final
+* Compatible con GPU y checkpoints
+
+---
+
+## 📚 Dataset
+
 FER2013 (Facial Expression Recognition)
-🔗 Kaggle Link
-
-lua
-Copiar
-Editar
+🔗 Kaggle Link: [https://www.kaggle.com/datasets/msambare/fer2013](https://www.kaggle.com/datasets/msambare/fer2013)
 
 ---
 
@@ -105,3 +102,4 @@ def download_fer2013():
 
 if __name__ == "__main__":
     download_fer2013()
+```
