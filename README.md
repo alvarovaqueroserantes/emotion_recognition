@@ -36,9 +36,9 @@ pip install -r requirements.txt
 
 ### Download dataset:
 
-Coloca manualmente el archivo `fer2013.csv` en la carpeta `data/`.
+Manually place the file `fer2013.csv` in the `data/` folder.
 
-O usa el script:
+Or use the script:
 
 ```bash
 python utils/download_kaggle.py
@@ -52,11 +52,11 @@ python utils/download_kaggle.py
 python main.py
 ```
 
-Para configurar hiperparámetros, edita `configs/config.yaml`.
+To configure hyperparameters, edit `configs/config.yaml`.
 
 ---
 
-## 📊 Visualize
+## 📊 Visualization
 
 ```bash
 tensorboard --logdir runs/
@@ -66,9 +66,9 @@ tensorboard --logdir runs/
 
 ## 📈 Results
 
-* Accuracy y F1 en cada epoch
-* Matriz de confusión final
-* Compatible con GPU y checkpoints
+* Accuracy and F1 score per epoch
+* Final confusion matrix
+* GPU compatible with checkpoint support
 
 ---
 
@@ -81,14 +81,14 @@ FER2013 (Facial Expression Recognition)
 
 ## ✅ 2. `utils/download_kaggle.py`
 
-Este script automatiza la descarga del dataset usando la API de Kaggle.
+This script automates the dataset download using the Kaggle API.
 
 ```python
 import os
 import zipfile
 
 def download_fer2013():
-    print("📦 Descargando dataset FER2013 desde Kaggle...")
+    print("📦 Downloading FER2013 dataset from Kaggle...")
     os.system("kaggle datasets download -d msambare/fer2013 -p data/")
     
     zip_path = "data/fer2013.zip"
@@ -96,9 +96,9 @@ def download_fer2013():
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
             zip_ref.extractall("data/")
         os.remove(zip_path)
-        print("✅ Dataset descargado y extraído correctamente.")
+        print("✅ Dataset downloaded and extracted successfully.")
     else:
-        print("⚠️ No se encontró el archivo ZIP. Asegúrate de tener configurado Kaggle API correctamente.")
+        print("⚠️ ZIP file not found. Make sure Kaggle API is configured correctly.")
 
 if __name__ == "__main__":
     download_fer2013()
