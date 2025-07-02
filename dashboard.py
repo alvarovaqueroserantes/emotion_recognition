@@ -149,7 +149,6 @@ with tab1:
             st.markdown("#### Processing video, please wait...")
             progress_bar = st.progress(0, text="Processing video...")
 
-            # Prepare output
             output_path = "processed_video.mp4"
             result_path = "video_results.json"
             results = []
@@ -157,6 +156,8 @@ with tab1:
             cap = cv2.VideoCapture(video_path)
             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
             fps = cap.get(cv2.CAP_PROP_FPS)
+            if fps == 0:
+                fps = 10  # fallback
             w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             out = cv2.VideoWriter(output_path, fourcc, fps, (w, h))
@@ -183,7 +184,9 @@ with tab1:
                         cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255,255,255), 2)
                     frame_emotions.append(pred_label)
                 results.append(frame_emotions)
-                out.write(frame)
+                # reconvert to BGR before writing
+                frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                out.write(frame_bgr)
                 frame_counter += 1
                 progress_bar.progress(frame_counter/total_frames, text=f"Processing frame {frame_counter}/{total_frames}")
 
@@ -217,56 +220,62 @@ with tab1:
 # ========================
 with tab2:
     if os.path.exists("video_results.json"):
-        with open("video_results.json") as f:
-            video_results = json.load(f)
-        st.info("Analyzing processed video...")
+        with st.spinner("Loading video results..."):
+            with open("video_results.json") as f:
+                video_results = json.load(f)
+            st.success("Results loaded successfully.")
 
-        # Flatten results
+        progress = st.progress(0, text="Analyzing results...")
         flat = [emo for frame in video_results for emo in frame]
         counts = Counter(flat)
+        progress.progress(0.5, text="Calculating metrics...")
 
         st.metric("Total Predictions", len(flat))
         st.metric("Unique Emotions Detected", len(counts))
 
-        # bar chart
+        # bar
         bar_options = {
             "xAxis": {"type":"category", "data": list(counts.keys())},
             "yAxis": {"type":"value"},
-            "series": [{
+            "series": [ {
                 "type":"bar",
                 "data": list(counts.values()),
                 "color": "#16a085"
             }]
         }
+        progress.progress(0.7, text="Building bar chart...")
         st_echarts(options=bar_options, height="400px")
 
-        # pie chart
+        # pie
         pie_data = [{"value": v, "name": k} for k,v in counts.items()]
         pie_options = {
             "title": {"text": "Emotion Distribution", "left":"center"},
             "tooltip": {"trigger":"item"},
-            "series": [{
+            "series": [ {
                 "name": "Emotions",
                 "type": "pie",
                 "radius": "50%",
                 "data": pie_data
             }]
         }
+        progress.progress(0.9, text="Building pie chart...")
         st_echarts(options=pie_options, height="400px")
 
-        # timeline chart
+        # timeline
         timeline_data = [frame[0] if frame else "No Face" for frame in video_results]
-        timeline_counts = [timeline_data.count(e) for e in EMOTION_CLASSES]
+        timeline_emotions = list(set(timeline_data + ["No Face"]))
         timeline_options = {
             "xAxis": {"type":"category", "data": list(range(len(timeline_data)))},
-            "yAxis": {"type":"category", "data": EMOTION_CLASSES},
-            "series": [{
+            "yAxis": {"type":"category", "data": timeline_emotions},
+            "series": [ {
                 "type": "line",
-                "data": [EMOTION_CLASSES.index(e) if e in EMOTION_CLASSES else -1 for e in timeline_data],
+                "data": [timeline_emotions.index(e) for e in timeline_data],
                 "smooth": True
             }]
         }
+        progress.progress(1.0, text="Finished analysis.")
         st_echarts(options=timeline_options, height="400px")
+        progress.empty()
 
     else:
         st.warning("No video processed yet. Please upload a video in the Prediction tab.")
