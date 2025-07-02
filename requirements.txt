@@ -8,3 +8,6 @@ kaggle
 matplotlib
 seaborn
 tqdm
+streamlit
+plotly
+cvlib
