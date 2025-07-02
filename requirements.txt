@@ -11,3 +11,5 @@ tqdm
 streamlit
 plotly
 cvlib
+streamlit-echarts
+tensorflow
