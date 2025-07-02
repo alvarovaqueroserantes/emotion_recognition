@@ -13,3 +13,4 @@ plotly
 cvlib
 streamlit-echarts
 tensorflow
+streamlit_echarts
