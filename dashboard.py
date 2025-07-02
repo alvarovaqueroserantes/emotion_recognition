@@ -117,7 +117,10 @@ with tab1:
             st.markdown("#### Processing video, please wait...")
             progress_bar = st.progress(0, text="Processing video...")
 
-            mp_face = mp.solutions.face_detection.FaceDetection(model_selection=0, min_detection_confidence=confidence_threshold)
+            mp_face = mp.solutions.face_detection.FaceDetection(
+                model_selection=0, 
+                min_detection_confidence=confidence_threshold
+            )
 
             output_path = "processed_video.mp4"
             result_path = "video_results.json"
@@ -125,9 +128,7 @@ with tab1:
 
             cap = cv2.VideoCapture(video_path)
             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-            fps = cap.get(cv2.CAP_PROP_FPS)
-            if fps == 0:
-                fps = 10
+            fps = cap.get(cv2.CAP_PROP_FPS) or 10
             w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             out = cv2.VideoWriter(output_path, fourcc, fps, (w, h))
@@ -140,11 +141,15 @@ with tab1:
                 if not ret:
                     break
                 frame_counter += 1
+
+                # Process every 5th frame
                 if frame_counter % 5 != 0:
                     continue
+
                 rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 results_mp = mp_face.process(rgb_frame)
                 frame_emotions = []
+
                 if results_mp.detections:
                     for detection in results_mp.detections:
                         bboxC = detection.location_data.relative_bounding_box
@@ -152,10 +157,12 @@ with tab1:
                         y1 = int(bboxC.ymin * h)
                         x2 = int((bboxC.xmin + bboxC.width) * w)
                         y2 = int((bboxC.ymin + bboxC.height) * h)
-                        x1,y1,x2,y2 = max(0,x1), max(0,y1), min(w,x2), min(h,y2)
-                        face_crop = rgb_frame[y1:y2, x1:x2]
-                        if face_crop.size == 0:
+                        # validate coordinates
+                        x1, y1 = max(0,x1), max(0,y1)
+                        x2, y2 = min(w,x2), min(h,y2)
+                        if x2-x1 <=0 or y2-y1 <=0:
                             continue
+                        face_crop = rgb_frame[y1:y2, x1:x2]
                         pil_face = Image.fromarray(face_crop)
                         pred_label, _ = predict_on_image(pil_face, model)
                         cv2.rectangle(frame, (x1,y1), (x2,y2), (0,255,0), 2)
@@ -163,6 +170,8 @@ with tab1:
                             cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255,255,255), 2)
                         frame_emotions.append(pred_label)
                 results.append(frame_emotions)
+
+                # convert back to BGR before saving
                 out.write(frame)
                 progress_bar.progress(frame_counter/total_frames, text=f"Processed {frame_counter}/{total_frames}")
 
@@ -186,7 +195,7 @@ with tab1:
             chart_options = {
                 "xAxis": {"type": "category", "data": EMOTION_CLASSES},
                 "yAxis": {"type": "value"},
-                "series": [ {
+                "series": [{
                     "data": list(probabilities),
                     "type": "bar",
                     "color": "#2980b9"
@@ -199,10 +208,9 @@ with tab1:
 # ========================
 with tab2:
     if os.path.exists("video_results.json"):
-        with st.spinner("Loading video results..."):
+        with st.spinner("Loading analysis..."):
             with open("video_results.json") as f:
                 video_results = json.load(f)
-            st.success("Results loaded successfully.")
 
         flat = [emo for frame in video_results for emo in frame if frame]
         if not flat:
@@ -213,47 +221,43 @@ with tab2:
             st.metric("Unique Emotions Detected", len(counts))
 
             # bar
-            bar_options = {
+            st_echarts({
                 "xAxis": {"type":"category", "data": list(counts.keys())},
                 "yAxis": {"type":"value"},
-                "series": [ {
+                "series": [{
                     "type":"bar",
                     "data": list(counts.values()),
                     "color": "#16a085"
                 }]
-            }
-            st_echarts(options=bar_options, height="400px")
+            }, height="400px")
 
             # pie
             pie_data = [{"value": v, "name": k} for k,v in counts.items()]
-            pie_options = {
+            st_echarts({
                 "title": {"text": "Emotion Distribution", "left":"center"},
                 "tooltip": {"trigger":"item"},
-                "series": [ {
-                    "name": "Emotions",
+                "series": [{
                     "type": "pie",
                     "radius": "50%",
                     "data": pie_data
                 }]
-            }
-            st_echarts(options=pie_options, height="400px")
+            }, height="400px")
 
             # timeline
             timeline_data = [frame[0] if frame else "No Face" for frame in video_results]
-            timeline_emotions = list(set(timeline_data + ["No Face"]))
-            timeline_options = {
+            unique_timeline = list(set(timeline_data + ["No Face"]))
+            st_echarts({
                 "xAxis": {"type":"category", "data": list(range(len(timeline_data)))},
-                "yAxis": {"type":"category", "data": timeline_emotions},
-                "series": [ {
+                "yAxis": {"type":"category", "data": unique_timeline},
+                "series": [{
                     "type": "line",
-                    "data": [timeline_emotions.index(e) for e in timeline_data],
+                    "data": [unique_timeline.index(e) for e in timeline_data],
                     "smooth": True
                 }]
-            }
-            st_echarts(options=timeline_options, height="400px")
+            }, height="400px")
 
     else:
-        st.warning("No video processed yet. Please upload a video in the Prediction tab.")
+        st.warning("No processed video found yet, please use the Prediction tab first.")
 
 # ========================
 # FOOTER
