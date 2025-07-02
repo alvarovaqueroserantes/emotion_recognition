@@ -7,6 +7,8 @@ from PIL import Image
 import cv2
 import numpy as np
 import tempfile
+import json
+from collections import Counter
 from sklearn.metrics import confusion_matrix, classification_report, accuracy_score, f1_score
 from streamlit_echarts import st_echarts
 import urllib.request
@@ -28,14 +30,12 @@ device = torch.device("cuda" if config["use_gpu"] and torch.cuda.is_available() 
 # ========================
 @st.cache_resource
 def load_trained_model(checkpoint_path, model_name, num_classes):
-    # comprobar si existe
     if not os.path.exists(checkpoint_path):
         with st.spinner("Downloading model weights from Google Drive..."):
             gdrive_url = "https://drive.google.com/uc?export=download&id=1yGdQQsoskjAOG-IG9OoFS3K2aBWyVDcD"
             os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
             urllib.request.urlretrieve(gdrive_url, checkpoint_path)
             st.success("Checkpoint downloaded successfully.")
-
     model = get_model(model_name, num_classes)
     checkpoint = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(checkpoint["model_state"])
@@ -81,7 +81,7 @@ def generate_conf_matrix_chart(cm, labels):
             "axisLabel": {"rotate": 45}
         },
         "yAxis": {"type": "category", "data": labels},
-        "series": [{
+        "series": [ {
             "name": "Confusion Matrix",
             "type": "heatmap",
             "data": [d["value"] for d in data],
@@ -98,7 +98,6 @@ st.set_page_config(
     layout="wide"
 )
 
-# Corporate header
 st.markdown("""
     <h2 style="color:#2c3e50; font-weight:600; margin-bottom:0;">
     Emotion Recognition Dashboard
@@ -131,7 +130,7 @@ model = load_trained_model(checkpoint_path, model_name, len(EMOTION_CLASSES))
 tab1, tab2 = st.tabs(["Prediction", "Evaluation"])
 
 # ========================
-# TAB 1
+# TAB 1 - Video / Image
 # ========================
 with tab1:
     uploaded_file = st.file_uploader(
@@ -139,105 +138,138 @@ with tab1:
         type=["jpg", "jpeg", "png", "mp4", "avi"]
     )
 
-    col1, col2 = st.columns([3,2])
+    if uploaded_file:
+        if uploaded_file.type.startswith("video"):
+            file_bytes = uploaded_file.read()
+            tfile = tempfile.NamedTemporaryFile(delete=False)
+            tfile.write(file_bytes)
+            tfile.close()
+            video_path = tfile.name
 
-    with col1:
-        if uploaded_file:
-            if uploaded_file.type.startswith("video"):
-                file_bytes = uploaded_file.read()
-                tfile = tempfile.NamedTemporaryFile(delete=False)
-                tfile.write(file_bytes)
-                tfile.close()
-                video_path = tfile.name
+            st.markdown("#### Processing video, please wait...")
+            progress_bar = st.progress(0, text="Processing video...")
 
-                st.markdown("#### Video Preview")
-                st.video(video_path)
+            # Prepare output
+            output_path = "processed_video.mp4"
+            result_path = "video_results.json"
+            results = []
 
-                # Process video with detection
-                cap = cv2.VideoCapture(video_path)
-                stframe = st.empty()
+            cap = cv2.VideoCapture(video_path)
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            out = cv2.VideoWriter(output_path, fourcc, fps, (w, h))
 
-                count_preds = 0
-                while True:
-                    ret, frame = cap.read()
-                    if not ret:
-                        break
-                    import cvlib as cv
-                    faces, confidences = cv.detect_face(frame)
-                    for (box, conf) in zip(faces, confidences):
-                        if conf < confidence_threshold:
-                            continue
-                        x1, y1, x2, y2 = box
-                        face_roi = frame[y1:y2, x1:x2]
-                        face_rgb = cv2.cvtColor(face_roi, cv2.COLOR_BGR2RGB)
-                        pil_face = Image.fromarray(face_rgb)
-                        pred_label, _ = predict_on_image(pil_face, model)
-                        cv2.rectangle(frame, (x1,y1), (x2,y2), (0,255,0), 2)
-                        cv2.putText(frame, f"{pred_label}", (x1,y1-10),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255,255,255), 2)
-                        count_preds += 1
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            frame_counter = 0
 
-                    stframe.image(frame, channels="BGR")
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                import cvlib as cv
+                faces, confidences = cv.detect_face(frame)
+                frame_emotions = []
+                for (box, conf) in zip(faces, confidences):
+                    if conf < confidence_threshold:
+                        continue
+                    x1,y1,x2,y2 = box
+                    face_rgb = cv2.cvtColor(frame[y1:y2, x1:x2], cv2.COLOR_BGR2RGB)
+                    pil_face = Image.fromarray(face_rgb)
+                    pred_label, _ = predict_on_image(pil_face, model)
+                    cv2.rectangle(frame, (x1,y1), (x2,y2), (0,255,0), 2)
+                    cv2.putText(frame, pred_label, (x1,y1-10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255,255,255), 2)
+                    frame_emotions.append(pred_label)
+                results.append(frame_emotions)
+                out.write(frame)
+                frame_counter += 1
+                progress_bar.progress(frame_counter/total_frames, text=f"Processing frame {frame_counter}/{total_frames}")
 
-                cap.release()
-                st.success(f"Processed {count_preds} face predictions on this video.")
+            cap.release()
+            out.release()
+            with open(result_path, "w") as f:
+                json.dump(results, f)
+            progress_bar.empty()
+            st.success("Video processed successfully.")
+            st.video(output_path)
+        else:
+            image_pil = Image.open(uploaded_file).convert("RGB")
+            st.image(image_pil, caption="Uploaded Image", use_column_width=True)
 
-            else:
-                image_pil = Image.open(uploaded_file).convert("RGB")
-                st.image(image_pil, caption="Uploaded Image", use_column_width=True)
+            pred_label, probabilities = predict_on_image(image_pil, model)
+            st.info(f"Predicted: **{pred_label}**")
 
-                pred_label, probabilities = predict_on_image(image_pil, model)
-                st.info(f"Predicted: **{pred_label}**")
-
-                # ECharts bar chart
-                chart_options = {
-                    "xAxis": {"type": "category", "data": EMOTION_CLASSES},
-                    "yAxis": {"type": "value"},
-                    "series": [ {
-                        "data": list(probabilities),
-                        "type": "bar",
-                        "color": "#2980b9"
-                    }]
-                }
-                st_echarts(options=chart_options, height="400px")
-
-    with col2:
-        st.markdown("### KPI Summary")
-        st.metric("Detected Classes", len(EMOTION_CLASSES))
-        st.metric("Input Size", f"{config['input_size']}x{config['input_size']}")
-        st.metric("Model", model_name)
+            chart_options = {
+                "xAxis": {"type": "category", "data": EMOTION_CLASSES},
+                "yAxis": {"type": "value"},
+                "series": [ {
+                    "data": list(probabilities),
+                    "type": "bar",
+                    "color": "#2980b9"
+                }]
+            }
+            st_echarts(options=chart_options, height="400px")
 
 # ========================
-# TAB 2
+# TAB 2 - Evaluation of last video
 # ========================
 with tab2:
-    if st.button("Evaluate on Validation Set"):
-        st.info("Evaluating...")
-        _, val_loader = get_dataloaders(
-            batch_size=config["batch_size"],
-            input_size=config["input_size"]
-        )
-        all_preds, all_labels = [], []
-        with torch.no_grad():
-            for images, labels in val_loader:
-                images = images.to(device)
-                outputs = model(images)
-                _, preds = torch.max(outputs, 1)
-                all_preds.extend(preds.cpu().numpy())
-                all_labels.extend(labels.numpy())
-        acc = accuracy_score(all_labels, all_preds)
-        f1 = f1_score(all_labels, all_preds, average="macro")
-        cm = confusion_matrix(all_labels, all_preds)
+    if os.path.exists("video_results.json"):
+        with open("video_results.json") as f:
+            video_results = json.load(f)
+        st.info("Analyzing processed video...")
 
-        st.metric("Validation Accuracy", f"{acc*100:.2f}%")
-        st.metric("F1 Score", f"{f1:.2f}")
+        # Flatten results
+        flat = [emo for frame in video_results for emo in frame]
+        counts = Counter(flat)
 
-        options_cm = generate_conf_matrix_chart(cm, EMOTION_CLASSES)
-        st_echarts(options=options_cm, height="500px")
+        st.metric("Total Predictions", len(flat))
+        st.metric("Unique Emotions Detected", len(counts))
 
-        st.markdown("#### Detailed Report")
-        report = classification_report(all_labels, all_preds, target_names=EMOTION_CLASSES, output_dict=True)
-        st.dataframe(report)
+        # bar chart
+        bar_options = {
+            "xAxis": {"type":"category", "data": list(counts.keys())},
+            "yAxis": {"type":"value"},
+            "series": [{
+                "type":"bar",
+                "data": list(counts.values()),
+                "color": "#16a085"
+            }]
+        }
+        st_echarts(options=bar_options, height="400px")
+
+        # pie chart
+        pie_data = [{"value": v, "name": k} for k,v in counts.items()]
+        pie_options = {
+            "title": {"text": "Emotion Distribution", "left":"center"},
+            "tooltip": {"trigger":"item"},
+            "series": [{
+                "name": "Emotions",
+                "type": "pie",
+                "radius": "50%",
+                "data": pie_data
+            }]
+        }
+        st_echarts(options=pie_options, height="400px")
+
+        # timeline chart
+        timeline_data = [frame[0] if frame else "No Face" for frame in video_results]
+        timeline_counts = [timeline_data.count(e) for e in EMOTION_CLASSES]
+        timeline_options = {
+            "xAxis": {"type":"category", "data": list(range(len(timeline_data)))},
+            "yAxis": {"type":"category", "data": EMOTION_CLASSES},
+            "series": [{
+                "type": "line",
+                "data": [EMOTION_CLASSES.index(e) if e in EMOTION_CLASSES else -1 for e in timeline_data],
+                "smooth": True
+            }]
+        }
+        st_echarts(options=timeline_options, height="400px")
+
+    else:
+        st.warning("No video processed yet. Please upload a video in the Prediction tab.")
 
 # ========================
 # FOOTER
