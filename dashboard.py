@@ -9,13 +9,11 @@ import numpy as np
 import tempfile
 import json
 from collections import Counter
-from sklearn.metrics import confusion_matrix, classification_report, accuracy_score, f1_score
 from streamlit_echarts import st_echarts
 import urllib.request
 import mediapipe as mp
 
 from models.emotion_cnn import get_model
-from utils.dataset import get_dataloaders
 
 # ========================
 # CONFIG
@@ -119,7 +117,6 @@ with tab1:
             st.markdown("#### Processing video, please wait...")
             progress_bar = st.progress(0, text="Processing video...")
 
-            # mediapipe setup
             mp_face = mp.solutions.face_detection.FaceDetection(model_selection=0, min_detection_confidence=confidence_threshold)
 
             output_path = "processed_video.mp4"
@@ -143,15 +140,11 @@ with tab1:
                 if not ret:
                     break
                 frame_counter += 1
-                # skip 1 of 5 frames
                 if frame_counter % 5 != 0:
                     continue
-                small_frame = cv2.resize(frame, (w//2, h//2))
-                rgb_small = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
-
-                results_mp = mp_face.process(rgb_small)
+                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                results_mp = mp_face.process(rgb_frame)
                 frame_emotions = []
-
                 if results_mp.detections:
                     for detection in results_mp.detections:
                         bboxC = detection.location_data.relative_bounding_box
@@ -159,8 +152,11 @@ with tab1:
                         y1 = int(bboxC.ymin * h)
                         x2 = int((bboxC.xmin + bboxC.width) * w)
                         y2 = int((bboxC.ymin + bboxC.height) * h)
-                        face_rgb = cv2.cvtColor(frame[y1:y2, x1:x2], cv2.COLOR_BGR2RGB)
-                        pil_face = Image.fromarray(face_rgb)
+                        x1,y1,x2,y2 = max(0,x1), max(0,y1), min(w,x2), min(h,y2)
+                        face_crop = rgb_frame[y1:y2, x1:x2]
+                        if face_crop.size == 0:
+                            continue
+                        pil_face = Image.fromarray(face_crop)
                         pred_label, _ = predict_on_image(pil_face, model)
                         cv2.rectangle(frame, (x1,y1), (x2,y2), (0,255,0), 2)
                         cv2.putText(frame, pred_label, (x1,y1-10),
@@ -168,7 +164,7 @@ with tab1:
                         frame_emotions.append(pred_label)
                 results.append(frame_emotions)
                 out.write(frame)
-                progress_bar.progress(frame_counter/total_frames, text=f"Processed frame {frame_counter}/{total_frames}")
+                progress_bar.progress(frame_counter/total_frames, text=f"Processed {frame_counter}/{total_frames}")
 
             cap.release()
             out.release()
@@ -177,6 +173,10 @@ with tab1:
             progress_bar.empty()
             st.success("Video processed successfully.")
             st.video(output_path)
+            with open(output_path, "rb") as f:
+                st.download_button("Download processed video", f, file_name="processed_video.mp4")
+            with open(result_path, "rb") as f:
+                st.download_button("Download analysis JSON", f, file_name="video_results.json")
 
         else:
             image_pil = Image.open(uploaded_file).convert("RGB")
@@ -204,57 +204,54 @@ with tab2:
                 video_results = json.load(f)
             st.success("Results loaded successfully.")
 
-        progress = st.progress(0, text="Analyzing results...")
-        flat = [emo for frame in video_results for emo in frame]
-        counts = Counter(flat)
-        progress.progress(0.5, text="Calculating metrics...")
+        flat = [emo for frame in video_results for emo in frame if frame]
+        if not flat:
+            st.warning("No faces detected in the processed video.")
+        else:
+            counts = Counter(flat)
+            st.metric("Total Predictions", len(flat))
+            st.metric("Unique Emotions Detected", len(counts))
 
-        st.metric("Total Predictions", len(flat))
-        st.metric("Unique Emotions Detected", len(counts))
+            # bar
+            bar_options = {
+                "xAxis": {"type":"category", "data": list(counts.keys())},
+                "yAxis": {"type":"value"},
+                "series": [ {
+                    "type":"bar",
+                    "data": list(counts.values()),
+                    "color": "#16a085"
+                }]
+            }
+            st_echarts(options=bar_options, height="400px")
 
-        # bar
-        bar_options = {
-            "xAxis": {"type":"category", "data": list(counts.keys())},
-            "yAxis": {"type":"value"},
-            "series": [ {
-                "type":"bar",
-                "data": list(counts.values()),
-                "color": "#16a085"
-            }]
-        }
-        progress.progress(0.7, text="Building bar chart...")
-        st_echarts(options=bar_options, height="400px")
+            # pie
+            pie_data = [{"value": v, "name": k} for k,v in counts.items()]
+            pie_options = {
+                "title": {"text": "Emotion Distribution", "left":"center"},
+                "tooltip": {"trigger":"item"},
+                "series": [ {
+                    "name": "Emotions",
+                    "type": "pie",
+                    "radius": "50%",
+                    "data": pie_data
+                }]
+            }
+            st_echarts(options=pie_options, height="400px")
 
-        # pie
-        pie_data = [{"value": v, "name": k} for k,v in counts.items()]
-        pie_options = {
-            "title": {"text": "Emotion Distribution", "left":"center"},
-            "tooltip": {"trigger":"item"},
-            "series": [ {
-                "name": "Emotions",
-                "type": "pie",
-                "radius": "50%",
-                "data": pie_data
-            }]
-        }
-        progress.progress(0.9, text="Building pie chart...")
-        st_echarts(options=pie_options, height="400px")
+            # timeline
+            timeline_data = [frame[0] if frame else "No Face" for frame in video_results]
+            timeline_emotions = list(set(timeline_data + ["No Face"]))
+            timeline_options = {
+                "xAxis": {"type":"category", "data": list(range(len(timeline_data)))},
+                "yAxis": {"type":"category", "data": timeline_emotions},
+                "series": [ {
+                    "type": "line",
+                    "data": [timeline_emotions.index(e) for e in timeline_data],
+                    "smooth": True
+                }]
+            }
+            st_echarts(options=timeline_options, height="400px")
 
-        # timeline
-        timeline_data = [frame[0] if frame else "No Face" for frame in video_results]
-        timeline_emotions = list(set(timeline_data + ["No Face"]))
-        timeline_options = {
-            "xAxis": {"type":"category", "data": list(range(len(timeline_data)))},
-            "yAxis": {"type":"category", "data": timeline_emotions},
-            "series": [ {
-                "type": "line",
-                "data": [timeline_emotions.index(e) for e in timeline_data],
-                "smooth": True
-            }]
-        }
-        progress.progress(1.0, text="Finished analysis.")
-        st_echarts(options=timeline_options, height="400px")
-        progress.empty()
     else:
         st.warning("No video processed yet. Please upload a video in the Prediction tab.")
 
