@@ -12,6 +12,7 @@ from collections import Counter
 from sklearn.metrics import confusion_matrix, classification_report, accuracy_score, f1_score
 from streamlit_echarts import st_echarts
 import urllib.request
+import mediapipe as mp
 
 from models.emotion_cnn import get_model
 from utils.dataset import get_dataloaders
@@ -59,37 +60,6 @@ def predict_on_image(image_pil, model):
         pred_idx = np.argmax(probabilities)
         return EMOTION_CLASSES[pred_idx], probabilities
 
-def generate_conf_matrix_chart(cm, labels):
-    data = []
-    for i, row in enumerate(cm.tolist()):
-        for j, val in enumerate(row):
-            data.append({"value": [j, i, val]})
-    options = {
-        "title": {"text": "Confusion Matrix", "left": "center"},
-        "tooltip": {"position": "top"},
-        "visualMap": {
-            "min": 0,
-            "max": int(np.max(cm)),
-            "calculable": True,
-            "orient": "horizontal",
-            "left": "center",
-            "bottom": "15%"
-        },
-        "xAxis": {
-            "type": "category",
-            "data": labels,
-            "axisLabel": {"rotate": 45}
-        },
-        "yAxis": {"type": "category", "data": labels},
-        "series": [ {
-            "name": "Confusion Matrix",
-            "type": "heatmap",
-            "data": [d["value"] for d in data],
-            "label": {"show": True}
-        }]
-    }
-    return options
-
 # ========================
 # STREAMLIT UI
 # ========================
@@ -130,7 +100,7 @@ model = load_trained_model(checkpoint_path, model_name, len(EMOTION_CLASSES))
 tab1, tab2 = st.tabs(["Prediction", "Evaluation"])
 
 # ========================
-# TAB 1 - Video / Image
+# TAB 1
 # ========================
 with tab1:
     uploaded_file = st.file_uploader(
@@ -149,6 +119,9 @@ with tab1:
             st.markdown("#### Processing video, please wait...")
             progress_bar = st.progress(0, text="Processing video...")
 
+            # mediapipe setup
+            mp_face = mp.solutions.face_detection.FaceDetection(model_selection=0, min_detection_confidence=confidence_threshold)
+
             output_path = "processed_video.mp4"
             result_path = "video_results.json"
             results = []
@@ -157,7 +130,7 @@ with tab1:
             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
             fps = cap.get(cv2.CAP_PROP_FPS)
             if fps == 0:
-                fps = 10  # fallback
+                fps = 10
             w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             out = cv2.VideoWriter(output_path, fourcc, fps, (w, h))
@@ -169,26 +142,33 @@ with tab1:
                 ret, frame = cap.read()
                 if not ret:
                     break
-                import cvlib as cv
-                faces, confidences = cv.detect_face(frame)
-                frame_emotions = []
-                for (box, conf) in zip(faces, confidences):
-                    if conf < confidence_threshold:
-                        continue
-                    x1,y1,x2,y2 = box
-                    face_rgb = cv2.cvtColor(frame[y1:y2, x1:x2], cv2.COLOR_BGR2RGB)
-                    pil_face = Image.fromarray(face_rgb)
-                    pred_label, _ = predict_on_image(pil_face, model)
-                    cv2.rectangle(frame, (x1,y1), (x2,y2), (0,255,0), 2)
-                    cv2.putText(frame, pred_label, (x1,y1-10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255,255,255), 2)
-                    frame_emotions.append(pred_label)
-                results.append(frame_emotions)
-                # reconvert to BGR before writing
-                frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                out.write(frame_bgr)
                 frame_counter += 1
-                progress_bar.progress(frame_counter/total_frames, text=f"Processing frame {frame_counter}/{total_frames}")
+                # skip 1 of 5 frames
+                if frame_counter % 5 != 0:
+                    continue
+                small_frame = cv2.resize(frame, (w//2, h//2))
+                rgb_small = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
+
+                results_mp = mp_face.process(rgb_small)
+                frame_emotions = []
+
+                if results_mp.detections:
+                    for detection in results_mp.detections:
+                        bboxC = detection.location_data.relative_bounding_box
+                        x1 = int(bboxC.xmin * w)
+                        y1 = int(bboxC.ymin * h)
+                        x2 = int((bboxC.xmin + bboxC.width) * w)
+                        y2 = int((bboxC.ymin + bboxC.height) * h)
+                        face_rgb = cv2.cvtColor(frame[y1:y2, x1:x2], cv2.COLOR_BGR2RGB)
+                        pil_face = Image.fromarray(face_rgb)
+                        pred_label, _ = predict_on_image(pil_face, model)
+                        cv2.rectangle(frame, (x1,y1), (x2,y2), (0,255,0), 2)
+                        cv2.putText(frame, pred_label, (x1,y1-10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255,255,255), 2)
+                        frame_emotions.append(pred_label)
+                results.append(frame_emotions)
+                out.write(frame)
+                progress_bar.progress(frame_counter/total_frames, text=f"Processed frame {frame_counter}/{total_frames}")
 
             cap.release()
             out.release()
@@ -197,13 +177,12 @@ with tab1:
             progress_bar.empty()
             st.success("Video processed successfully.")
             st.video(output_path)
+
         else:
             image_pil = Image.open(uploaded_file).convert("RGB")
             st.image(image_pil, caption="Uploaded Image", use_column_width=True)
-
             pred_label, probabilities = predict_on_image(image_pil, model)
             st.info(f"Predicted: **{pred_label}**")
-
             chart_options = {
                 "xAxis": {"type": "category", "data": EMOTION_CLASSES},
                 "yAxis": {"type": "value"},
@@ -216,7 +195,7 @@ with tab1:
             st_echarts(options=chart_options, height="400px")
 
 # ========================
-# TAB 2 - Evaluation of last video
+# TAB 2
 # ========================
 with tab2:
     if os.path.exists("video_results.json"):
@@ -276,7 +255,6 @@ with tab2:
         progress.progress(1.0, text="Finished analysis.")
         st_echarts(options=timeline_options, height="400px")
         progress.empty()
-
     else:
         st.warning("No video processed yet. Please upload a video in the Prediction tab.")
 
