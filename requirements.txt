@@ -13,5 +13,5 @@ plotly
 cvlib
 streamlit-echarts
 tensorflow
-streamlit_echarts
+streamlit_elements
 mediapipe 
