@@ -14,3 +14,4 @@ cvlib
 streamlit-echarts
 tensorflow
 streamlit_echarts
+mediapipe 
