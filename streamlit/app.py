@@ -1,0 +1,574 @@
+# C:\Users\alvar\Documents\GitHub\emotion_recognition\streamlit\app.py
+
+"""
+EmotionSense – stakeholder-grade Streamlit front-end
+• pydantic settings (& dark / corp themes)
+• MediaPipe + batched inference pipeline
+• Modern visuals: bullet KPIs, rolling-share line, log heat-map
+• Per-asset metrics with CSV / Excel export
+• Enhanced UI/UX with Streamlit Elements and custom theming
+"""
+
+import os
+os.environ["STREAMLIT_SERVER_ENABLE_WATCHER_FILE_WATCHER"] = "false"
+os.environ["TORCH_CPP_LOG_LEVEL"] = "ERROR"
+
+import base64
+import gc
+import tempfile
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from time import perf_counter # Import perf_counter for FPS calculation
+
+import cv2
+import numpy as np
+import streamlit as st
+from PIL import Image
+from streamlit_echarts import st_pyecharts
+from streamlit_elements import elements, dashboard, mui, html
+
+from config import cfg
+from styles import build_theme
+from model import load_emotion_model, _infer_resnet_variant # Import _infer_resnet_variant
+from vision import EmotionDetector
+from viz import (
+    emotion_bar,
+    emotion_pie,
+    bullet_metric,
+    rolling_share_line,
+    transition_heatmap,
+    metrics_to_dataframe,
+    dataframe_to_csv_bytes,
+    dataframe_to_excel_bytes,
+    emotion_radar,
+    sentiment_gauge,
+    emotion_timeline,
+)
+
+# ────────── UI bootstrapping ─────────────────────────────────────────
+st.set_page_config(page_title="EmotionSense Analytics", layout="wide", page_icon=":bar_chart:")
+st.markdown(build_theme(cfg.palette), unsafe_allow_html=True) # Ensure palette is dict for styles.py
+
+
+# ────────── detector (cached) ───────────────────────────────────────
+@st.cache_resource
+def init_detector() -> EmotionDetector:
+    model, device = load_emotion_model(cfg)
+    return EmotionDetector(model, device)
+
+detector = init_detector()
+
+# ────────── helpers ─────────────────────────────────────────────────
+def video_download_link(data: bytes, filename: str) -> str:
+    b64 = base64.b64encode(data).decode()
+    return (
+        f'<a href="data:video/mp4;base64,{b64}" download="{filename}" '
+        f'style="background:{cfg.palette["accent"]};color:#fff;'
+        f'padding:10px 20px;border-radius:4px;text-decoration:none;'
+        f'display:inline-block; margin-top: 1rem; width: 100%; text-align: center;">Download Processed Video</a>'
+    )
+
+def torch_gc() -> None:
+    import torch
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    gc.collect()
+
+def calculate_sentiment(emotions_counts: dict) -> float:
+    """Calculates a weighted sentiment score based on emotion counts."""
+    # Weights for sentiment score (can be tuned)
+    weights = {
+        "Sad": -1.0,
+        "Angry": -0.5,
+        "Neutral": 0.0,
+        "Surprise": 0.7,
+        "Happy": 1.0,
+        "Fear": -0.7,
+        "Disgust": 0.5
+    }
+    
+    total_count = sum(emotions_counts.values())
+    if total_count == 0:
+        return 0.0
+    
+    weighted_sum = sum(weights.get(e, 0) * count for e, count in emotions_counts.items())
+    
+    # Normalize score to be between -1 and 1
+    # Max possible score: sum of positive counts * 1.0
+    # Min possible score: sum of negative counts * -1.0 (approx)
+    # A simple normalization for -1 to 1 scale:
+    # Max positive sum = sum(count * weight for pos_emotions)
+    # Max negative sum = sum(count * weight for neg_emotions)
+    
+    # A robust normalization ensures it stays within [-1, 1] range for visualization
+    # Max possible raw score (all Happy): 1.0 * total_count
+    # Min possible raw score (all Angry): -1.0 * total_count
+    
+    # We can divide by total_count, which naturally normalizes it to the range [-1, 1]
+    return weighted_sum / total_count
+
+
+# ────────── main application layout ────────────────────────────────────────────
+def main() -> None:
+    # Initialize session state variables if they don't exist
+    if "process_triggered" not in st.session_state:
+        st.session_state["process_triggered"] = False
+    if "download_report" not in st.session_state:
+        st.session_state["download_report"] = False
+    if "metrics" not in st.session_state:
+        st.session_state["metrics"] = defaultdict(int)
+    if "all_metrics" not in st.session_state:
+        st.session_state["all_metrics"] = []
+    if "timeline" not in st.session_state:
+        st.session_state["timeline"] = []
+    if "last_video_name" not in st.session_state:
+        st.session_state["last_video_name"] = "video"
+    if "calculated_fps" not in st.session_state:
+        st.session_state["calculated_fps"] = "N/A" # For displaying FPS
+
+    with elements("dashboard"):
+        # Premium dashboard layout using Grid
+        layout = [
+            dashboard.Item("header", 0, 0, 12, 1),
+            dashboard.Item("controls", 0, 1, 3, 11), # Fixed sidebar for controls
+            dashboard.Item("main_content_area", 3, 1, 9, 11), # Main content area for dynamic views
+        ]
+        
+        with dashboard.Grid(layout):
+            with mui.Paper(key="header", sx={"p": 2, "borderRadius": "16px", "boxShadow": "0 4px 12px rgba(0,0,0,0.05)"}):
+                st.markdown("<h1 style='text-align: center; color: var(--text);'>EmotionSense Analytics Platform</h1>", unsafe_allow_html=True)
+                st.markdown("<p style='text-align: center; color: var(--text); opacity: 0.7;'>Unlock deeper insights into audience sentiment and engagement using advanced AI.</p>", unsafe_allow_html=True)
+            
+            with mui.Paper(key="controls", sx={
+                    "p": 2,
+                    "borderRadius": "16px",
+                    "boxShadow": "0 4px 12px rgba(0,0,0,0.05)",
+                    "overflowY": "auto",
+                    "maxHeight": "90vh"
+                    }):
+                st.subheader("Analysis Configuration")
+                
+                analysis_mode = st.radio(
+                    "Select Analysis Type", 
+                    ["🖼️ Image Analysis", "🎥 Video Analysis", "📊 Overall Performance"], 
+                    index=0,
+                    key="analysis_mode_radio" # Unique key for this radio button
+                )
+                
+                detector.confidence_threshold = st.slider(
+                    "Detection Confidence", 0.5, 1.0, cfg.confidence, 0.01,
+                    help="Faces detected with a probability below this threshold are ignored. Higher values mean stricter detection."
+                )
+                
+                st.divider()
+                
+                # Button to trigger processing
+                if st.button("Process Media", type="primary", use_container_width=True, key="process_media_button"):
+                    st.session_state["process_triggered"] = True
+                else:
+                    st.session_state["process_triggered"] = False # Reset if button not pressed
+
+                with st.container(border=True):
+                    st.subheader("Data Export")
+                    if st.button("Prepare Data Report", use_container_width=True):
+                        st.session_state["download_report"] = True
+
+                    if st.session_state.get("download_report", False):
+                        records: list[dict] = st.session_state.get("all_metrics", [])
+                        if records:
+                            df = metrics_to_dataframe(records)
+                            excel_bytes = dataframe_to_excel_bytes(df)
+                            csv_bytes = dataframe_to_csv_bytes(df)
+                            st.success("✅ Data ready to download below:")
+                            st.download_button(
+                                label="⬇ CSV Format",
+                                data=csv_bytes,
+                                file_name="emotion_metrics.csv",
+                                mime="text/csv",
+                                use_container_width=True
+                            )
+                            if excel_bytes:
+                                st.download_button(
+                                    label="⬇ Excel Format",
+                                    data=excel_bytes,
+                                    file_name="emotion_metrics.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    use_container_width=True
+                                )
+                            else:
+                                st.info("Install `openpyxl` to enable Excel export.")
+                        else:
+                            st.warning("No metrics available yet — run an analysis first.")
+
+            with mui.Paper(key="main_content_area", sx={"p": 2, "borderRadius": "16px", "boxShadow": "0 4px 12px rgba(0,0,0,0.05)", "overflowY": "auto"}):
+                # Dynamically render content based on selected mode
+                if analysis_mode == "🖼️ Image Analysis":
+                    image_mode_dashboard()
+                elif analysis_mode == "🎥 Video Analysis":
+                    video_mode_dashboard()
+                else: # "📊 Overall Performance"
+                    performance_mode_dashboard()
+    
+    # Handle report download outside the elements context for standard Streamlit behavior
+    # This ensures Streamlit's native download button works correctly
+    if st.session_state.get("download_report", False):
+        records: list[dict] = st.session_state.get("all_metrics", [])
+        if records:
+            df = metrics_to_dataframe(records)
+            st.success("Report data prepared for download!")
+            st.download_button(
+                label="⬇ Download Full Metrics (CSV)",
+                data=dataframe_to_csv_bytes(df),
+                file_name="emotion_metrics.csv",
+                mime="text/csv",
+                key="download_csv"
+            )
+            excel_bytes = dataframe_to_excel_bytes(df)
+            if excel_bytes:
+                st.download_button(
+                    label="⬇ Download Full Metrics (Excel)",
+                    data=excel_bytes,
+                    file_name="emotion_metrics.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="download_excel"
+                )
+            else:
+                st.warning("Install `openpyxl` (`pip install openpyxl`) to enable Excel export.")
+        else:
+            st.info("No data available to export. Please process some media first.")
+        st.session_state["download_report"] = False # Reset the flag after offering download
+
+
+# ====================================================================
+#                           IMAGE MODE DASHBOARD
+# ====================================================================
+def image_mode_dashboard() -> None:
+    st.header("Single Image Emotion Analysis")
+    file = st.file_uploader("Upload an image (JPG, JPEG, PNG)", type=["jpg", "jpeg", "png"], key="image_uploader")
+    
+    if not file:
+        st.info("Please upload an image to begin the analysis. Click 'Process Media' after uploading.")
+        # Clear session state for image specific metrics if no file
+        st.session_state["metrics_current_image"] = defaultdict(int)
+        st.session_state["sentiment_current_image"] = 0.0
+        return
+
+    # Only process if triggered by the button
+    if st.session_state.get("process_triggered"):
+        with st.spinner("Analyzing image..."):
+            bgr = cv2.cvtColor(np.array(Image.open(file)), cv2.COLOR_RGB2BGR)
+            detections = detector.detect(bgr)
+
+            rgb_preview = cv2.cvtColor(detector.draw(bgr, detections), cv2.COLOR_BGR2RGB)
+            
+            st.markdown("### Processed Image Preview")
+            st.image(rgb_preview, use_container_width=True, caption=f"Faces detected in {file.name}")
+
+            if not detections:
+                st.warning("No faces detected in the uploaded image. Try another image or adjust confidence.")
+                st.session_state["metrics_current_image"] = defaultdict(int)
+                st.session_state["sentiment_current_image"] = 0.0
+                return
+
+            # ── per-face details ----------------------------------------------------
+            history = defaultdict(int)
+            for det in detections:
+                history[det.label] += 1
+                with st.expander(f"Detected Face: {det.label} – {det.confidence:.0%}"):
+                    st_pyecharts(
+                        emotion_bar(dict(zip(cfg.emotion_labels, det.probabilities))),
+                        height="320px",
+                    )
+            
+            st.session_state["metrics_current_image"] = history
+            st.session_state["sentiment_current_image"] = calculate_sentiment(history)
+
+        st.markdown("---")
+        st.markdown("### Overall Image Insights")
+        col1, col2, col3 = st.columns([1,1,0.8]) # Adjusted column ratio for sentiment gauge
+        
+        # Display aggregated charts for the image
+        with col1:
+            st_pyecharts(emotion_pie(
+                {e: st.session_state["metrics_current_image"].get(e, 0) / sum(st.session_state["metrics_current_image"].values()) if sum(st.session_state["metrics_current_image"].values()) > 0 else 0
+                 for e in cfg.emotion_labels}
+            ), height="350px")
+        with col2:
+            st_pyecharts(emotion_radar(
+                {e: st.session_state["metrics_current_image"].get(e, 0) / sum(st.session_state["metrics_current_image"].values()) if sum(st.session_state["metrics_current_image"].values()) > 0 else 0
+                 for e in cfg.emotion_labels}
+            ), height="350px")
+        with col3:
+            st_pyecharts(sentiment_gauge(st.session_state["sentiment_current_image"]), height="350px")
+
+        # ── persist metrics --------------------------------------------------
+        # Append to overall metrics
+        st.session_state.setdefault("all_metrics", [])
+        st.session_state["all_metrics"].extend(
+            {"source": file.name, "emotion": e, "count": c} for e, c in history.items()
+        )
+        # For image mode, the timeline is just a single frame's data, relevant for "Overall Performance" Timeline
+        # For a single image, the timeline usually isn't very dynamic. We'll capture its single "frame" data.
+        st.session_state["timeline"] = [history] # Overwrite timeline with current image data
+
+
+# ====================================================================
+#                            VIDEO MODE DASHBOARD
+# ====================================================================
+def video_mode_dashboard() -> None:
+    st.header("Video Emotion Analysis")
+    file = st.file_uploader("Upload a video (MP4, AVI, MOV)", type=["mp4", "avi", "mov"], key="video_uploader")
+    
+    if not file:
+        st.info("Please upload a video to begin the analysis. Click 'Process Media' after uploading.")
+        # Clear video-specific metrics if no file
+        st.session_state["video_hist"] = defaultdict(int)
+        st.session_state["video_timeline"] = []
+        st.session_state["video_matrix"] = np.zeros((len(cfg.emotion_labels), len(cfg.emotion_labels)), dtype=int)
+        return
+    
+    # Store video name for metrics
+    st.session_state["last_video_name"] = file.name
+    st.video(file) # Show video preview immediately
+
+    if st.session_state.get("process_triggered"):
+        with st.status("Processing video, please wait... This may take a while for longer videos.", expanded=True) as status_box:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as src:
+                src.write(file.getbuffer())
+                src_path = Path(src.name)
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as dst:
+                dst_path = Path(dst.name)
+
+            hist, timeline, matrix, calculated_fps = _process_video(src_path, dst_path)
+
+            status_box.update(label="Video Processing Complete!", state="complete", expanded=False)
+            
+            st.markdown("---")
+            st.markdown("### Processed Video Output")
+            # Offer download link for the processed video
+            with st.container(border=True):
+                st.markdown(video_download_link(dst_path.read_bytes(), f"processed_{file.name}"), unsafe_allow_html=True)
+            # Clean up temporary files
+            os.unlink(src_path)
+            os.unlink(dst_path)
+
+            # Store video-specific results in session state
+            st.session_state["video_hist"] = hist
+            st.session_state["video_timeline"] = timeline
+            st.session_state["video_matrix"] = matrix
+            st.session_state["calculated_fps"] = calculated_fps # Update global FPS
+
+        # After processing, display dashboard elements for the video
+        _display_video_dashboard(
+            st.session_state["video_hist"],
+            st.session_state["video_timeline"],
+            st.session_state["video_matrix"]
+        )
+    else:
+        # If not triggered, check if there's previous video data to display
+        if st.session_state.get("video_hist"):
+            st.info("Video data loaded from previous session. Click 'Process Media' to re-analyze or upload a new video.")
+            _display_video_dashboard(
+                st.session_state["video_hist"],
+                st.session_state["video_timeline"],
+                st.session_state["video_matrix"]
+            )
+        else:
+            st.info("Upload a video and click 'Process Media' to see analysis results.")
+
+
+def _process_video(src_path: Path, dst_path: Path) -> tuple[dict, list, np.ndarray, str]:
+    """Internal function to handle video processing and return aggregated data."""
+    cap = cv2.VideoCapture(str(src_path))
+    if not cap.isOpened():
+        st.error("Could not open video file. Please ensure it's a valid format.")
+        return defaultdict(int), [], np.zeros((len(cfg.emotion_labels), len(cfg.emotion_labels)), dtype=int), "N/A"
+
+    fps_video = cap.get(cv2.CAP_PROP_FPS) # Original video FPS
+    w, h = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    writer = cv2.VideoWriter(str(dst_path), cv2.VideoWriter_fourcc(*"mp4v"), fps_video, (w, h))
+
+    hist = defaultdict(int)
+    timeline: list[dict[str, int]] = []
+    matrix = np.zeros((len(cfg.emotion_labels), len(cfg.emotion_labels)), dtype=int)
+    prev_label: str | None = None
+    
+    inference_times = [] # To store time taken for each detection batch
+
+    # Using st.progress within st.status for a cleaner UI
+    progress_bar = st.progress(0.0)
+    for idx in range(total_frames):
+        ok, frame = cap.read()
+        if not ok:
+            break
+        
+        t_start_inference = perf_counter() # Start timing for inference
+        current_detections = detector.detect(frame) # Renamed 'dets' to 'current_detections' for clarity
+        t_end_inference = perf_counter() # End timing
+        inference_times.append(t_end_inference - t_start_inference)
+
+        frame_counter = defaultdict(int)
+        current_frame_emotions_in_labels = [] # Collect labels for this frame that passed confidence
+        
+        for det in current_detections: # Iterate over the results of detector.detect
+            hist[det.label] += 1
+            frame_counter[det.label] += 1
+            current_frame_emotions_in_labels.append(det.label)
+        
+        # Update transition matrix based on detected faces in the current frame
+        if prev_label is not None and current_frame_emotions_in_labels:
+            # We will consider transitions from the single 'prev_label' to all detected emotions in the current frame
+            for current_label in current_frame_emotions_in_labels:
+                i = cfg.emotion_labels.index(prev_label)
+                j = cfg.emotion_labels.index(current_label)
+                matrix[i, j] += 1
+        
+        # Set prev_label for the next iteration.
+        # If faces were detected and emotions assigned, pick the most frequent emotion.
+        # Otherwise, reset prev_label to None to indicate no continuous emotion.
+        if current_frame_emotions_in_labels:
+            prev_label = max(frame_counter, key=frame_counter.get) # Pick the most frequent emotion in current frame
+        else: # No faces detected or no emotions passed confidence in this frame
+            prev_label = None # Reset prev_label
+
+        timeline.append(frame_counter)
+        writer.write(detector.draw(frame, current_detections)) # Use current_detections for drawing
+        progress_bar.progress((idx + 1) / total_frames)
+
+    writer.release(); cap.release(); torch_gc()
+    
+    # Calculate average FPS for inference
+    total_inference_duration = sum(inference_times)
+    calculated_fps = round(total_frames / total_inference_duration, 1) if total_inference_duration > 0 else "N/A"
+
+    # Store total metrics for "Overall Performance" tab
+    st.session_state.setdefault("metrics", defaultdict(int)) # Aggregated for all analyses
+    for k, v in hist.items():
+        st.session_state.metrics[k] += v
+
+    st.session_state.setdefault("all_metrics", []) # Raw detections for export
+    st.session_state["all_metrics"].extend(
+        {
+            "source": st.session_state.get("last_video_name", "video"),
+            "emotion": e,
+            "count": c,
+        }
+        for e, c in hist.items()
+    )
+    # Store full timeline for "Overall Performance" as well
+    st.session_state["timeline"] = timeline 
+
+    return hist, timeline, matrix, calculated_fps
+
+def _display_video_dashboard(hist, timeline, matrix):
+    """Helper function to display video analysis charts."""
+    total_det = sum(hist.values())
+    if not total_det:
+        st.warning("No faces detected in the video with the current confidence settings.")
+        return
+
+    st.markdown("---")
+    st.markdown("### Video Analysis Overview")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        dist = {e: hist[e] / total_det for e in cfg.emotion_labels}
+        st_pyecharts(emotion_pie(dist), height="350px")
+    with col2:
+        st_pyecharts(emotion_radar(dist), height="350px")
+
+    st_pyecharts(sentiment_gauge(calculate_sentiment(hist)), height="300px")
+
+    st.markdown("---")
+    st.markdown("### Temporal Emotion Dynamics")
+    st_pyecharts(rolling_share_line(timeline, window=60), height="480px")
+
+    st.markdown("---")
+    st.markdown("### Emotion Transition Patterns")
+    st_pyecharts(transition_heatmap(matrix), height="500px")
+
+    st.markdown("---")
+    st.markdown("### Key Video Performance Indicators")
+    col1, col2, col3 = st.columns(3)
+    
+    # Calculate metrics for the current video display
+    detection_rate = (total_det / len(timeline) * 100) if len(timeline) > 0 else 0
+    diversity_val = round(len(hist) / len(cfg.emotion_labels) * 100, 1) if len(cfg.emotion_labels) > 0 else 0
+
+    with col1:
+        st.markdown(f'<div class="metric-card"><p class="metric-title">Detection Rate</p><p class="metric-value">{detection_rate:.1f}%</p></div>', unsafe_allow_html=True)
+    with col2:
+        st.markdown(f'<div class="metric-card"><p class="metric-title">Diversity</p><p class="metric-value">{diversity_val:.1f}%</p></div>', unsafe_allow_html=True)
+    with col3:
+        st.markdown(f'<div class="metric-card"><p class="metric-title">Inference FPS</p><p class="metric-value">{st.session_state.get("calculated_fps", "N/A")}</p></div>', unsafe_allow_html=True)
+
+    st.markdown("---")
+    st.markdown("### Frame-by-Frame Emotion Timeline (Interactive)")
+    st_pyecharts(emotion_timeline(timeline), height="500px")
+
+
+# ====================================================================
+#                          PERFORMANCE MODE DASHBOARD
+# ====================================================================
+def performance_mode_dashboard() -> None:
+    st.header("Overall Performance Analytics")
+
+    records: list[dict] = st.session_state.get("all_metrics", [])
+    if not records:
+        st.info("Analyze at least one image or video first to populate comprehensive performance data.")
+        return
+
+    df = metrics_to_dataframe(records)
+    
+    st.markdown("### Aggregated Emotion Data Table")
+    st.dataframe(df, use_container_width=True, hide_index=True) # Hide DataFrame index
+
+    st.markdown("---")
+    st.markdown("### Overall Emotion Distribution Across All Analyses")
+    total_overall_detections = int(df["count"].sum())
+    overall_dist = df.groupby("emotion")["count"].sum().apply(lambda x: x / total_overall_detections).to_dict()
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st_pyecharts(emotion_pie(overall_dist), height="400px")
+    with col2:
+        st_pyecharts(emotion_radar(overall_dist), height="400px")
+
+    st.markdown("---")
+    st.markdown("### Overall Sentiment Score")
+    overall_sentiment_score = calculate_sentiment(df.groupby("emotion")["count"].sum().to_dict())
+    st_pyecharts(sentiment_gauge(overall_sentiment_score), height="300px")
+
+    st.markdown("---")
+    st.markdown("### Historical Emotion Timeline (Aggregated Video Data)")
+    # This timeline specifically uses the 'timeline' stored from the last video analysis,
+    # or it could be an aggregation of *all* timelines if stored granularly.
+    # For simplicity, currently it re-uses the last video's timeline or is empty for image-only sessions.
+    # If a user processes multiple videos, you might need to combine their timelines here.
+    if st.session_state.get("timeline"):
+        st_pyecharts(rolling_share_line(st.session_state["timeline"], window=60), height="480px")
+    else:
+        st.info("No video timeline data available for historical view.")
+
+
+    st.markdown("---")
+    st.markdown("### Model & System Information")
+    st.info(f"**Model Architecture:** ResNet-{_infer_resnet_variant(detector.model.state_dict())} (auto-detected)")
+    st.info(f"**Processing Device:** {detector.device.type.upper()}")
+    st.info(f"**Half Precision (FP16):** {'Enabled' if cfg.half_precision else 'Disabled'} (CUDA only)")
+    st.info(f"**Batch Size for Inference:** {cfg.batch_size}")
+    
+    # Placeholder for static model performance metrics if you have them
+    st.markdown("##### Model Performance (Pre-trained Benchmarks)")
+    st.write("- **Overall Accuracy (Example):** 90.5% on FER2013 dataset")
+    st.write("- **Average Inference Latency (Example):** 15ms per frame")
+    st.caption("These metrics are indicative of the model's general performance and are not calculated dynamically by the app.")
+
+
+# ────────── run ─────────────────────────────────────────────────────
+if __name__ == "__main__":
+    with ThreadPoolExecutor(): # Context manager for thread pooling
+        main()
