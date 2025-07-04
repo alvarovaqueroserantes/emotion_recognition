@@ -117,5 +117,3 @@ For a **state-of-the-art interactive UI** to analyze emotions visually (images &
 👉 [streamlit/README.md](./streamlit/README.md)
 
 ---
-
-# Happy Emotions! 🎉
