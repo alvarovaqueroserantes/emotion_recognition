@@ -570,7 +570,7 @@ def emotion_timeline(timeline: list, c: AppConfig = cfg) -> Timeline:
         tl.add(chart, f"Frame {i}")
 
     tl.add_schema(
-        play_interval=200,  # milisegundos (200 ms = 5 fps)
+        play_interval=50,  # milisegundos (200 ms = 5 fps)
         is_auto_play=True,
         is_loop_play=True,
         control_position="bottom"
