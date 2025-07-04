@@ -33,6 +33,8 @@ streamlit/
 ├── config.py              # Front-end config
 ├── styles.py              # Theming & CSS
 ├── viz.py                 # ECharts visualizations
+├── visuals.py             # Detection boxes drawing 
+├── models.py              # Model imports
 └── README.md
 ```
 
@@ -92,4 +94,4 @@ streamlit run app.py
 
 ---
 
-# Happy Streamliting! 🎈
+# Happy Streamliting!
