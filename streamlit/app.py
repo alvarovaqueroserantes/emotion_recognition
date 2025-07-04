@@ -50,7 +50,7 @@ from viz import (
 import base64
 
 # convert png to base64
-with open("icons/pensamiento-positivo.png", "rb") as f:
+with open(r"icons/pensamiento-positivo.png", "rb") as f:
     encoded = base64.b64encode(f.read()).decode()
 
 favicon_data_url = f"data:image/png;base64,{encoded}"
