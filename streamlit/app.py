@@ -47,7 +47,7 @@ from viz import (
 )
 
 # ────────── UI bootstrapping ─────────────────────────────────────────
-st.set_page_config(page_title="EmotionSense Analytics", layout="wide", page_icon=":bar_chart:")
+st.set_page_config(page_title="EmotionSense Analytics", layout="wide")
 st.markdown(build_theme(cfg.palette), unsafe_allow_html=True) # Ensure palette is dict for styles.py
 
 
