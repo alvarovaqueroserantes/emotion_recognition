@@ -19,7 +19,7 @@ import tempfile
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from time import perf_counter # Import perf_counter for FPS calculation
+from time import perf_counter
 
 import cv2
 import numpy as np
@@ -30,7 +30,7 @@ from streamlit_elements import elements, dashboard, mui, html
 
 from config import cfg
 from styles import build_theme
-from model import load_emotion_model, _infer_resnet_variant # Import _infer_resnet_variant
+from model import load_emotion_model, _infer_resnet_variant
 from vision import EmotionDetector
 from viz import (
     emotion_bar,
@@ -47,17 +47,14 @@ from viz import (
 )
 
 # ────────── UI bootstrapping ─────────────────────────────────────────
-# UI setup
 st.set_page_config(
     page_title="EmotionSense Analytics",
     layout="wide",
-    page_icon="🧠",   # emoji de cerebro, 100% compatible
+    page_icon="🧠",
 )
 
-# tu tema
+# apply custom theme
 st.markdown(build_theme(cfg.palette), unsafe_allow_html=True)
-
-
 
 # ────────── detector (cached) ───────────────────────────────────────
 @st.cache_resource
@@ -84,8 +81,6 @@ def torch_gc() -> None:
     gc.collect()
 
 def calculate_sentiment(emotions_counts: dict) -> float:
-    """Calculates a weighted sentiment score based on emotion counts."""
-    # Weights for sentiment score (can be tuned)
     weights = {
         "Sad": -1.0,
         "Angry": -0.5,
@@ -95,95 +90,88 @@ def calculate_sentiment(emotions_counts: dict) -> float:
         "Fear": -0.7,
         "Disgust": 0.5
     }
-    
-    total_count = sum(emotions_counts.values())
-    if total_count == 0:
+    total = sum(emotions_counts.values())
+    if total == 0:
         return 0.0
-    
-    weighted_sum = sum(weights.get(e, 0) * count for e, count in emotions_counts.items())
-    
-    # Normalize score to be between -1 and 1
-    # Max possible score: sum of positive counts * 1.0
-    # Min possible score: sum of negative counts * -1.0 (approx)
-    # A simple normalization for -1 to 1 scale:
-    # Max positive sum = sum(count * weight for pos_emotions)
-    # Max negative sum = sum(count * weight for neg_emotions)
-    
-    # A robust normalization ensures it stays within [-1, 1] range for visualization
-    # Max possible raw score (all Happy): 1.0 * total_count
-    # Min possible raw score (all Angry): -1.0 * total_count
-    
-    # We can divide by total_count, which naturally normalizes it to the range [-1, 1]
-    return weighted_sum / total_count
+    weighted_sum = sum(weights.get(e, 0) * c for e, c in emotions_counts.items())
+    return weighted_sum / total
 
 
 # ────────── main application layout ────────────────────────────────────────────
 def main() -> None:
-    # Initialize session state variables if they don't exist
-    if "process_triggered" not in st.session_state:
-        st.session_state["process_triggered"] = False
-    if "download_report" not in st.session_state:
-        st.session_state["download_report"] = False
-    if "metrics" not in st.session_state:
-        st.session_state["metrics"] = defaultdict(int)
-    if "all_metrics" not in st.session_state:
-        st.session_state["all_metrics"] = []
-    if "timeline" not in st.session_state:
-        st.session_state["timeline"] = []
-    if "last_video_name" not in st.session_state:
-        st.session_state["last_video_name"] = "video"
-    if "calculated_fps" not in st.session_state:
-        st.session_state["calculated_fps"] = "N/A" # For displaying FPS
+    st.session_state.setdefault("process_triggered", False)
+    st.session_state.setdefault("download_report", False)
+    st.session_state.setdefault("metrics", defaultdict(int))
+    st.session_state.setdefault("all_metrics", [])
+    st.session_state.setdefault("timeline", [])
+    st.session_state.setdefault("last_video_name", "video")
+    st.session_state.setdefault("calculated_fps", "N/A")
 
     with elements("dashboard"):
-        # Premium dashboard layout using Grid
         layout = [
             dashboard.Item("header", 0, 0, 12, 1),
-            dashboard.Item("controls", 0, 1, 3, 11), # Fixed sidebar for controls
-            dashboard.Item("main_content_area", 3, 1, 9, 11), # Main content area for dynamic views
+            dashboard.Item("controls", 0, 1, 3, 11),
+            dashboard.Item("main_content_area", 3, 1, 9, 11),
         ]
-        
+
         with dashboard.Grid(layout):
-            with mui.Paper(key="header", sx={"p": 2, "borderRadius": "16px", "boxShadow": "0 4px 12px rgba(0,0,0,0.05)"}):
-                st.markdown("<h1 style='text-align: center; color: var(--text);'>EmotionSense Analytics Platform</h1>", unsafe_allow_html=True)
-                st.markdown("<p style='text-align: center; color: var(--text); opacity: 0.7;'>Unlock deeper insights into audience sentiment and engagement using advanced AI.</p>", unsafe_allow_html=True)
-            
-            with mui.Paper(key="controls", sx={
+            # Header
+            with mui.Paper(
+                key="header",
+                sx={"p": 2, "borderRadius": "16px", "boxShadow": "0 4px 12px rgba(0,0,0,0.05)"}
+            ):
+                with mui.Box(sx={"textAlign": "center"}):
+                    mui.Typography(
+                        "EmotionSense Analytics Platform",
+                        variant="h3",
+                        fontWeight="700",
+                        color="primary"
+                    )
+                    mui.Typography(
+                        "Unlock deeper insights into audience sentiment and engagement using advanced AI.",
+                        variant="subtitle1",
+                        color="text.secondary"
+                    )
+
+            # Controls sidebar
+            with mui.Card(
+                key="controls",
+                sx={
                     "p": 2,
                     "borderRadius": "16px",
-                    "boxShadow": "0 4px 12px rgba(0,0,0,0.05)",
+                    "boxShadow": "0 6px 18px rgba(0,0,0,0.1)",
                     "overflowY": "auto",
                     "maxHeight": "90vh"
-                    }):
-                st.subheader("Analysis Configuration")
-                
-                analysis_mode = st.radio(
-                    "Select Analysis Type", 
-                    ["🖼️ Image Analysis", "🎥 Video Analysis", "📊 Overall Performance"], 
-                    index=0,
-                    key="analysis_mode_radio" # Unique key for this radio button
-                )
-                
-                detector.confidence_threshold = st.slider(
-                    "Detection Confidence", 0.5, 1.0, cfg.confidence, 0.01,
-                    help="Faces detected with a probability below this threshold are ignored. Higher values mean stricter detection."
-                )
-                
-                st.divider()
-                
-                # Button to trigger processing
-                if st.button("Process Media", type="primary", use_container_width=True, key="process_media_button"):
-                    st.session_state["process_triggered"] = True
-                else:
-                    st.session_state["process_triggered"] = False # Reset if button not pressed
+                }
+            ):
+                with mui.Grow(in_=True, timeout=800):
+                    mui.CardHeader(title="Analysis Configuration", sx={"textAlign": "center"})
+                    mui.Divider()
 
-                with st.container(border=True):
-                    st.subheader("Data Export")
+                    analysis_mode = st.radio(
+                        "Select Analysis Type",
+                        ["🖼️ Image Analysis", "🎥 Video Analysis", "📊 Overall Performance"],
+                        index=0,
+                        key="analysis_mode_radio"
+                    )
+                    detector.confidence_threshold = st.slider(
+                        "Detection Confidence",
+                        0.5, 1.0, cfg.confidence, 0.01,
+                        help="Faces detected with a probability below this threshold are ignored."
+                    )
+                    st.divider()
+                    if st.button("Process Media", type="primary", use_container_width=True):
+                        st.session_state["process_triggered"] = True
+                    else:
+                        st.session_state["process_triggered"] = False
+
+                    st.divider()
+                    mui.CardHeader(title="Data Export", sx={"textAlign": "center"})
                     if st.button("Prepare Data Report", use_container_width=True):
                         st.session_state["download_report"] = True
 
-                    if st.session_state.get("download_report", False):
-                        records: list[dict] = st.session_state.get("all_metrics", [])
+                    if st.session_state["download_report"]:
+                        records = st.session_state.get("all_metrics", [])
                         if records:
                             df = metrics_to_dataframe(records)
                             excel_bytes = dataframe_to_excel_bytes(df)
@@ -209,19 +197,20 @@ def main() -> None:
                         else:
                             st.warning("No metrics available yet — run an analysis first.")
 
-            with mui.Paper(key="main_content_area", sx={"p": 2, "borderRadius": "16px", "boxShadow": "0 4px 12px rgba(0,0,0,0.05)", "overflowY": "auto"}):
-                # Dynamically render content based on selected mode
+            # Main content
+            with mui.Paper(
+                key="main_content_area",
+                sx={"p": 2, "borderRadius": "16px", "boxShadow": "0 4px 12px rgba(0,0,0,0.05)", "overflowY": "auto"}
+            ):
                 if analysis_mode == "🖼️ Image Analysis":
                     image_mode_dashboard()
                 elif analysis_mode == "🎥 Video Analysis":
                     video_mode_dashboard()
-                else: # "📊 Overall Performance"
+                else:
                     performance_mode_dashboard()
-    
-    # Handle report download outside the elements context for standard Streamlit behavior
-    # This ensures Streamlit's native download button works correctly
-    if st.session_state.get("download_report", False):
-        records: list[dict] = st.session_state.get("all_metrics", [])
+
+    if st.session_state["download_report"]:
+        records = st.session_state.get("all_metrics", [])
         if records:
             df = metrics_to_dataframe(records)
             st.success("Report data prepared for download!")
@@ -229,8 +218,7 @@ def main() -> None:
                 label="⬇ Download Full Metrics (CSV)",
                 data=dataframe_to_csv_bytes(df),
                 file_name="emotion_metrics.csv",
-                mime="text/csv",
-                key="download_csv"
+                mime="text/csv"
             )
             excel_bytes = dataframe_to_excel_bytes(df)
             if excel_bytes:
@@ -238,14 +226,13 @@ def main() -> None:
                     label="⬇ Download Full Metrics (Excel)",
                     data=excel_bytes,
                     file_name="emotion_metrics.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="download_excel"
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
             else:
-                st.warning("Install `openpyxl` (`pip install openpyxl`) to enable Excel export.")
+                st.warning("Install `openpyxl` to enable Excel export.")
         else:
             st.info("No data available to export. Please process some media first.")
-        st.session_state["download_report"] = False # Reset the flag after offering download
+        st.session_state["download_report"] = False
 
 
 # ====================================================================
@@ -578,5 +565,5 @@ def performance_mode_dashboard() -> None:
 
 # ────────── run ─────────────────────────────────────────────────────
 if __name__ == "__main__":
-    with ThreadPoolExecutor(): # Context manager for thread pooling
+    with ThreadPoolExecutor():
         main()
