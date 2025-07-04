@@ -125,49 +125,63 @@ def main() -> None:
     if "last_video_name" not in st.session_state:
         st.session_state["last_video_name"] = "video"
     if "calculated_fps" not in st.session_state:
-        st.session_state["calculated_fps"] = "N/A" # For displaying FPS
+        st.session_state["calculated_fps"] = "N/A"
 
     with elements("dashboard"):
-        # Premium dashboard layout using Grid
         layout = [
             dashboard.Item("header", 0, 0, 12, 1),
-            dashboard.Item("controls", 0, 1, 3, 11), # Fixed sidebar for controls
-            dashboard.Item("main_content_area", 3, 1, 9, 11), # Main content area for dynamic views
+            dashboard.Item("controls", 0, 1, 3, 11),
+            # no main_content_area in static layout, we will inject it conditionally
         ]
-        
+
         with dashboard.Grid(layout):
-            with mui.Paper(key="header", sx={"p": 2, "borderRadius": "16px", "boxShadow": "0 4px 12px rgba(0,0,0,0.05)"}):
-                st.markdown("<h1 style='text-align: center; color: var(--text);'>EmotionSense Analytics Platform</h1>", unsafe_allow_html=True)
-                st.markdown("<p style='text-align: center; color: var(--text); opacity: 0.7;'>Unlock deeper insights into audience sentiment and engagement using advanced AI.</p>", unsafe_allow_html=True)
-            
-            with mui.Paper(key="controls", sx={
+            with mui.Paper(
+                key="header",
+                sx={"p": 2, "borderRadius": "16px", "boxShadow": "0 4px 12px rgba(0,0,0,0.05)"}
+            ):
+                st.markdown(
+                    "<h1 style='text-align: center; color: var(--text);'>EmotionSense Analytics Platform</h1>",
+                    unsafe_allow_html=True,
+                )
+                st.markdown(
+                    "<p style='text-align: center; color: var(--text); opacity: 0.7;'>Unlock deeper insights into audience sentiment and engagement using advanced AI.</p>",
+                    unsafe_allow_html=True,
+                )
+
+            with mui.Paper(
+                key="controls",
+                sx={
                     "p": 2,
                     "borderRadius": "16px",
                     "boxShadow": "0 4px 12px rgba(0,0,0,0.05)",
                     "overflowY": "auto",
-                    "maxHeight": "90vh"
-                    }):
+                    "maxHeight": "90vh",
+                },
+            ):
                 st.subheader("Analysis Configuration")
-                
+
                 analysis_mode = st.radio(
-                    "Select Analysis Type", 
-                    ["🖼️ Image Analysis", "🎥 Video Analysis", "📊 Overall Performance"], 
+                    "Select Analysis Type",
+                    ["🖼️ Image Analysis", "🎥 Video Analysis", "📊 Overall Performance"],
                     index=0,
-                    key="analysis_mode_radio" # Unique key for this radio button
+                    key="analysis_mode_radio",
                 )
-                
+
                 detector.confidence_threshold = st.slider(
-                    "Detection Confidence", 0.5, 1.0, cfg.confidence, 0.01,
-                    help="Faces detected with a probability below this threshold are ignored. Higher values mean stricter detection."
+                    "Detection Confidence",
+                    0.5,
+                    1.0,
+                    cfg.confidence,
+                    0.01,
+                    help="Faces detected with a probability below this threshold are ignored.",
                 )
-                
+
                 st.divider()
-                
-                # Button to trigger processing
-                if st.button("Process Media", type="primary", use_container_width=True, key="process_media_button"):
+
+                if st.button("Process Media", type="primary", use_container_width=True):
                     st.session_state["process_triggered"] = True
                 else:
-                    st.session_state["process_triggered"] = False # Reset if button not pressed
+                    st.session_state["process_triggered"] = False
 
                 with st.container(border=True):
                     st.subheader("Data Export")
@@ -175,7 +189,7 @@ def main() -> None:
                         st.session_state["download_report"] = True
 
                     if st.session_state.get("download_report", False):
-                        records: list[dict] = st.session_state.get("all_metrics", [])
+                        records = st.session_state.get("all_metrics", [])
                         if records:
                             df = metrics_to_dataframe(records)
                             excel_bytes = dataframe_to_excel_bytes(df)
@@ -186,7 +200,7 @@ def main() -> None:
                                 data=csv_bytes,
                                 file_name="emotion_metrics.csv",
                                 mime="text/csv",
-                                use_container_width=True
+                                use_container_width=True,
                             )
                             if excel_bytes:
                                 st.download_button(
@@ -194,26 +208,38 @@ def main() -> None:
                                     data=excel_bytes,
                                     file_name="emotion_metrics.xlsx",
                                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                    use_container_width=True
+                                    use_container_width=True,
                                 )
                             else:
                                 st.info("Install `openpyxl` to enable Excel export.")
                         else:
                             st.warning("No metrics available yet — run an analysis first.")
 
-            with mui.Paper(key="main_content_area", sx={"p": 2, "borderRadius": "16px", "boxShadow": "0 4px 12px rgba(0,0,0,0.05)", "overflowY": "auto"}):
-                # Dynamically render content based on selected mode
+        # conditionally render main_content_area only if relevant
+        if (
+            (analysis_mode == "🖼️ Image Analysis" and st.session_state.get("metrics_current_image"))
+            or (analysis_mode == "🎥 Video Analysis" and st.session_state.get("video_hist"))
+            or (analysis_mode == "📊 Overall Performance" and st.session_state.get("all_metrics"))
+        ):
+            with mui.Paper(
+                key="main_content_area",
+                sx={
+                    "p": 2,
+                    "borderRadius": "16px",
+                    "boxShadow": "0 4px 12px rgba(0,0,0,0.05)",
+                    "overflowY": "auto",
+                },
+            ):
                 if analysis_mode == "🖼️ Image Analysis":
                     image_mode_dashboard()
                 elif analysis_mode == "🎥 Video Analysis":
                     video_mode_dashboard()
-                else: # "📊 Overall Performance"
+                else:
                     performance_mode_dashboard()
-    
-    # Handle report download outside the elements context for standard Streamlit behavior
-    # This ensures Streamlit's native download button works correctly
+
+    # outside elements
     if st.session_state.get("download_report", False):
-        records: list[dict] = st.session_state.get("all_metrics", [])
+        records = st.session_state.get("all_metrics", [])
         if records:
             df = metrics_to_dataframe(records)
             st.success("Report data prepared for download!")
@@ -222,7 +248,7 @@ def main() -> None:
                 data=dataframe_to_csv_bytes(df),
                 file_name="emotion_metrics.csv",
                 mime="text/csv",
-                key="download_csv"
+                key="download_csv",
             )
             excel_bytes = dataframe_to_excel_bytes(df)
             if excel_bytes:
@@ -231,13 +257,13 @@ def main() -> None:
                     data=excel_bytes,
                     file_name="emotion_metrics.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="download_excel"
+                    key="download_excel",
                 )
             else:
-                st.warning("Install `openpyxl` (`pip install openpyxl`) to enable Excel export.")
+                st.warning("Install `openpyxl` to enable Excel export.")
         else:
             st.info("No data available to export. Please process some media first.")
-        st.session_state["download_report"] = False # Reset the flag after offering download
+        st.session_state["download_report"] = False
 
 
 # ====================================================================
