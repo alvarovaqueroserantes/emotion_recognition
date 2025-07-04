@@ -46,15 +46,28 @@ from viz import (
     emotion_timeline,
 )
 
-# ────────── UI bootstrapping ─────────────────────────────────────────
+# ────────── UI bootstrap ─────────────────────────────────────────────
 st.set_page_config(
     page_title="EmotionSense Analytics",
     layout="wide",
     page_icon="🧠",
 )
-
-# apply custom theme
 st.markdown(build_theme(cfg.palette), unsafe_allow_html=True)
+
+# Persistent header
+st.markdown(
+    """
+    <div style="background: linear-gradient(90deg, #4e4376 0%, #2b5876 100%);
+                padding: 1rem 2rem;
+                border-radius: 0.5rem;
+                color: white;
+                margin-bottom: 1rem;">
+        <h1 style="margin:0; font-size:1.8rem;">EmotionSense Analytics Platform</h1>
+        <p style="margin:0.2rem 0 0; opacity:0.8;">Unlock deeper insights into audience sentiment and engagement with state-of-the-art AI.</p>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 
 # ────────── detector (cached) ───────────────────────────────────────
 @st.cache_resource
@@ -96,7 +109,6 @@ def calculate_sentiment(emotions_counts: dict) -> float:
     weighted_sum = sum(weights.get(e, 0) * c for e, c in emotions_counts.items())
     return weighted_sum / total
 
-
 # ────────── main application layout ────────────────────────────────────────────
 def main() -> None:
     st.session_state.setdefault("process_triggered", False)
@@ -115,7 +127,7 @@ def main() -> None:
         ]
 
         with dashboard.Grid(layout):
-            # Header
+            # ────────── Header panel
             with mui.Paper(
                 key="header",
                 sx={"p": 2, "borderRadius": "16px", "boxShadow": "0 4px 12px rgba(0,0,0,0.05)"}
@@ -133,7 +145,7 @@ def main() -> None:
                         color="text.secondary"
                     )
 
-            # Controls sidebar
+            # ────────── Controls sidebar
             with mui.Card(
                 key="controls",
                 sx={
@@ -147,7 +159,6 @@ def main() -> None:
                 with mui.Grow(in_=True, timeout=800):
                     mui.CardHeader(title="Analysis Configuration", sx={"textAlign": "center"})
                     mui.Divider()
-
                     analysis_mode = st.radio(
                         "Select Analysis Type",
                         ["🖼️ Image Analysis", "🎥 Video Analysis", "📊 Overall Performance"],
@@ -197,7 +208,7 @@ def main() -> None:
                         else:
                             st.warning("No metrics available yet — run an analysis first.")
 
-            # Main content
+            # ────────── Main content
             with mui.Paper(
                 key="main_content_area",
                 sx={"p": 2, "borderRadius": "16px", "boxShadow": "0 4px 12px rgba(0,0,0,0.05)", "overflowY": "auto"}
@@ -234,9 +245,8 @@ def main() -> None:
             st.info("No data available to export. Please process some media first.")
         st.session_state["download_report"] = False
 
-
 # ====================================================================
-#                           IMAGE MODE DASHBOARD
+# IMAGE MODE DASHBOARD
 # ====================================================================
 def image_mode_dashboard() -> None:
     st.header("Single Image Emotion Analysis")
@@ -244,91 +254,69 @@ def image_mode_dashboard() -> None:
     
     if not file:
         st.info("Please upload an image to begin the analysis. Click 'Process Media' after uploading.")
-        # Clear session state for image specific metrics if no file
         st.session_state["metrics_current_image"] = defaultdict(int)
         st.session_state["sentiment_current_image"] = 0.0
         return
 
-    # Only process if triggered by the button
     if st.session_state.get("process_triggered"):
         with st.spinner("Analyzing image..."):
             bgr = cv2.cvtColor(np.array(Image.open(file)), cv2.COLOR_RGB2BGR)
             detections = detector.detect(bgr)
-
             rgb_preview = cv2.cvtColor(detector.draw(bgr, detections), cv2.COLOR_BGR2RGB)
             
-            st.markdown("### Processed Image Preview")
-            st.image(rgb_preview, use_container_width=True, caption=f"Faces detected in {file.name}")
+            st.image(rgb_preview, use_container_width=True, caption=f"Detected faces in {file.name}")
 
             if not detections:
-                st.warning("No faces detected in the uploaded image. Try another image or adjust confidence.")
+                st.warning("No faces detected in the uploaded image.")
                 st.session_state["metrics_current_image"] = defaultdict(int)
                 st.session_state["sentiment_current_image"] = 0.0
                 return
 
-            # ── per-face details ----------------------------------------------------
             history = defaultdict(int)
             for det in detections:
                 history[det.label] += 1
-                with st.expander(f"Detected Face: {det.label} – {det.confidence:.0%}"):
-                    st_pyecharts(
-                        emotion_bar(dict(zip(cfg.emotion_labels, det.probabilities))),
-                        height="320px",
-                    )
+                with st.expander(f"{det.label} ({det.confidence:.0%})"):
+                    st_pyecharts(emotion_bar(dict(zip(cfg.emotion_labels, det.probabilities))), height="320px")
             
             st.session_state["metrics_current_image"] = history
             st.session_state["sentiment_current_image"] = calculate_sentiment(history)
 
-        st.markdown("---")
-        st.markdown("### Overall Image Insights")
-        col1, col2, col3 = st.columns([1,1,0.8]) # Adjusted column ratio for sentiment gauge
-        
-        # Display aggregated charts for the image
+        col1, col2, col3 = st.columns([1, 1, 1])
         with col1:
             st_pyecharts(emotion_pie(
-                {e: st.session_state["metrics_current_image"].get(e, 0) / sum(st.session_state["metrics_current_image"].values()) if sum(st.session_state["metrics_current_image"].values()) > 0 else 0
-                 for e in cfg.emotion_labels}
-            ), height="350px")
+                {e: history.get(e, 0) / sum(history.values()) if sum(history.values()) > 0 else 0
+                 for e in cfg.emotion_labels}), height="350px")
         with col2:
             st_pyecharts(emotion_radar(
-                {e: st.session_state["metrics_current_image"].get(e, 0) / sum(st.session_state["metrics_current_image"].values()) if sum(st.session_state["metrics_current_image"].values()) > 0 else 0
-                 for e in cfg.emotion_labels}
-            ), height="350px")
+                {e: history.get(e, 0) / sum(history.values()) if sum(history.values()) > 0 else 0
+                 for e in cfg.emotion_labels}), height="350px")
         with col3:
             st_pyecharts(sentiment_gauge(st.session_state["sentiment_current_image"]), height="350px")
 
-        # ── persist metrics --------------------------------------------------
-        # Append to overall metrics
-        st.session_state.setdefault("all_metrics", [])
         st.session_state["all_metrics"].extend(
             {"source": file.name, "emotion": e, "count": c} for e, c in history.items()
         )
-        # For image mode, the timeline is just a single frame's data, relevant for "Overall Performance" Timeline
-        # For a single image, the timeline usually isn't very dynamic. We'll capture its single "frame" data.
-        st.session_state["timeline"] = [history] # Overwrite timeline with current image data
-
+        st.session_state["timeline"] = [history]
 
 # ====================================================================
-#                            VIDEO MODE DASHBOARD
+# VIDEO MODE DASHBOARD
 # ====================================================================
 def video_mode_dashboard() -> None:
     st.header("Video Emotion Analysis")
     file = st.file_uploader("Upload a video (MP4, AVI, MOV)", type=["mp4", "avi", "mov"], key="video_uploader")
     
     if not file:
-        st.info("Please upload a video to begin the analysis. Click 'Process Media' after uploading.")
-        # Clear video-specific metrics if no file
+        st.info("Please upload a video to begin the analysis.")
         st.session_state["video_hist"] = defaultdict(int)
         st.session_state["video_timeline"] = []
         st.session_state["video_matrix"] = np.zeros((len(cfg.emotion_labels), len(cfg.emotion_labels)), dtype=int)
         return
     
-    # Store video name for metrics
     st.session_state["last_video_name"] = file.name
-    st.video(file) # Show video preview immediately
+    st.video(file)
 
     if st.session_state.get("process_triggered"):
-        with st.status("Processing video, please wait... This may take a while for longer videos.", expanded=True) as status_box:
+        with st.status("Processing video, please wait...", expanded=True):
             with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as src:
                 src.write(file.getbuffer())
                 src_path = Path(src.name)
@@ -337,40 +325,25 @@ def video_mode_dashboard() -> None:
 
             hist, timeline, matrix, calculated_fps = _process_video(src_path, dst_path)
 
-            status_box.update(label="Video Processing Complete!", state="complete", expanded=False)
-            
-            st.markdown("---")
-            st.markdown("### Processed Video Output")
-            # Offer download link for the processed video
-            with st.container(border=True):
-                st.markdown(video_download_link(dst_path.read_bytes(), f"processed_{file.name}"), unsafe_allow_html=True)
-            # Clean up temporary files
+            st.video(dst_path)
+            st.markdown(video_download_link(dst_path.read_bytes(), f"processed_{file.name}"), unsafe_allow_html=True)
             os.unlink(src_path)
             os.unlink(dst_path)
 
-            # Store video-specific results in session state
             st.session_state["video_hist"] = hist
             st.session_state["video_timeline"] = timeline
             st.session_state["video_matrix"] = matrix
-            st.session_state["calculated_fps"] = calculated_fps # Update global FPS
+            st.session_state["calculated_fps"] = calculated_fps
 
-        # After processing, display dashboard elements for the video
+        _display_video_dashboard(hist, timeline, matrix)
+
+    elif st.session_state.get("video_hist"):
+        st.info("Video loaded from session. Click 'Process Media' to re-analyze.")
         _display_video_dashboard(
             st.session_state["video_hist"],
             st.session_state["video_timeline"],
             st.session_state["video_matrix"]
         )
-    else:
-        # If not triggered, check if there's previous video data to display
-        if st.session_state.get("video_hist"):
-            st.info("Video data loaded from previous session. Click 'Process Media' to re-analyze or upload a new video.")
-            _display_video_dashboard(
-                st.session_state["video_hist"],
-                st.session_state["video_timeline"],
-                st.session_state["video_matrix"]
-            )
-        else:
-            st.info("Upload a video and click 'Process Media' to see analysis results.")
 
 
 def _process_video(src_path: Path, dst_path: Path) -> tuple[dict, list, np.ndarray, str]:
