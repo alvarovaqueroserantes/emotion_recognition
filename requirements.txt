@@ -16,3 +16,4 @@ tensorflow
 streamlit_elements
 mediapipe 
 pydantic-settings
+openpyxl 
