@@ -83,10 +83,10 @@ def _build_resnet(variant: str, num_classes: int) -> nn.Module:
 # III.  public loader
 # ------------------------------------------------------------------- #
 def load_emotion_model(settings: AppConfig = cfg) -> Tuple[nn.Module, torch.device]:
-    _ensure_weights(settings.model_path, settings.model_url)
+    _ensure_weights(settings.resolved_model_path, settings.model_url)
     device = torch.device("cuda" if settings.gpu and torch.cuda.is_available() else "cpu")
 
-    ckpt = torch.load(settings.model_path, map_location="cpu")
+    ckpt = torch.load(settings.resolved_model_path, map_location="cpu")
     if isinstance(ckpt, dict) and "model_state" in ckpt:
         ckpt = ckpt["model_state"]
     ckpt = _strip_module(ckpt)

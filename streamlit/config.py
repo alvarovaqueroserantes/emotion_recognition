@@ -1,4 +1,4 @@
-# C:\Users\alvar\Documents\GitHub\emotion_recognition\streamlit\config.py
+# streamlit/config.py
 
 from __future__ import annotations
 
@@ -15,7 +15,6 @@ from pydantic import Field, validator
 import torch
 
 # ───────────────────────── palettes ──────────────────────────
-# Existing palettes (keeping them for reference, though _PROFESSIONAL will be default)
 _LIGHT = {
     "background": "#FFFFFF",
     "card": "#F5F7FA",
@@ -42,57 +41,50 @@ _DARK = {
 
 _CORP = {
     **_LIGHT,
-    "accent": "#FF5A00",  # example corporate orange
+    "accent": "#FF5A00",
 }
 
-# --- IMPROVED PROFESSIONAL PALETTE ---
 _PROFESSIONAL = {
-    "background": "#FDFDFD",      # Very light off-white for main background
-    "card": "#FFFFFF",            # Pure white for cards, creating a clean, crisp look
-    "accent": "#007BFF",          # A vibrant, professional blue for key elements
-    "text": "#2C3E50",            # Dark, soft gray for primary text, easy on the eyes
-    "secondary": "#ECF0F1",       # Light gray for secondary backgrounds/dividers/highlights
-    "success": "#28A745",         # Standard green for success, clear and direct
-    "warning": "#FFC107",         # Standard amber for warning, noticeable
-    "error": "#DC3545",           # Standard red for error, for critical alerts
-    "border": "#E0E0E0",          # Soft border color for subtle separation
-    # New: Chart specific colors for Pyecharts to ensure distinct and appealing visuals
+    "background": "#FDFDFD",
+    "card": "#FFFFFF",
+    "accent": "#007BFF",
+    "text": "#2C3E50",
+    "secondary": "#ECF0F1",
+    "success": "#28A745",
+    "warning": "#FFC107",
+    "error": "#DC3545",
+    "border": "#E0E0E0",
     "chart_colors": [
-        "#007BFF", # Accent blue
-        "#28A745", # Success green
-        "#FFC107", # Warning amber
-        "#DC3545", # Error red
-        "#6F42C1", # A professional purple
-        "#17A2B8", # A calming teal
-        "#6C757D"  # A neutral grey
-    ]
+        "#007BFF",
+        "#28A745",
+        "#FFC107",
+        "#DC3545",
+        "#6F42C1",
+        "#17A2B8",
+        "#6C757D",
+    ],
 }
-
 
 # ───────────────────────── settings ──────────────────────────
 class AppConfig(BaseSettings):
     """
     Centralised, declarative configuration with env-override support.
-
-    • Reads values from environment variables (prefix `EMOTIONSENSE_`)
-      or a local `.env` file – perfect for CI/CD or Streamlit Cloud.
-    • Immutable (`frozen=True`) so downstream code can trust it.
     """
 
     # ----- UI -----
-    theme: Literal["light", "dark", "corp", "pro"] = Field("pro", env="THEME") # Default to 'pro'
+    theme: Literal["light", "dark", "corp", "pro"] = Field("pro", env="THEME")
     confidence: float = Field(0.7, ge=0, le=1, env="CONFIDENCE")
     input_size: int = Field(224, gt=0, env="INPUT_SIZE")
 
-    # ----- model / runtime -----
+    # ----- model -----
     model_path: Path = Field(
         default=Path(
-            r"C:\Users\alvar\Documents\GitHub\emotion_recognition\checkpoints\emotion_model.pth"
+            r"..\checkpoints\emotion_model.pth"
         ),
         env="MODEL_PATH",
     )
     model_url: str | None = Field(
-        default=None,  # optional remote fallback (HuggingFace, S3…)
+        default="https://drive.google.com/uc?export=download&id=1yGdQQsoskjAOG-IG9OoFS3K2aBWyVDcD",
         env="MODEL_URL",
     )
     batch_size: int = Field(8, gt=0, env="BATCH_SIZE")
@@ -112,14 +104,14 @@ class AppConfig(BaseSettings):
 
     # pydantic config
     class Config:
-        env_prefix = "EMOTIONSENSE_"  # e.g. EMOTIONSENSE_MODEL_PATH
+        env_prefix = "EMOTIONSENSE_"
         env_file = ".env"
         frozen = True
         case_sensitive = False
 
     # ---------- derived props ----------
     @property
-    def palette(self) -> dict[str, str | list[str]]: # Updated return type to include list[str] for chart_colors
+    def palette(self) -> dict[str, str | list[str]]:
         return {
             "light": _LIGHT,
             "dark": _DARK,
@@ -129,18 +121,45 @@ class AppConfig(BaseSettings):
 
     # ---------- helpers ----------
     def to_json(self, path: Path | None = None) -> str:
-        """Serialise settings (resolved palette included) to JSON."""
-        data = self.model_dump() # Use model_dump for Pydantic v2+
+        data = self.model_dump()
         data["palette"] = self.palette
         text = json.dumps(data, indent=2)
         if path:
             path.write_text(text)
         return text
 
+    @property
+    def resolved_model_path(self) -> Path:
+        """
+        Return a valid checkpoint path, downloading from model_url if not found locally.
+        """
+        if self.model_path.exists():
+            return self.model_path
+
+        # fallback: download from Google Drive (converted link)
+        if self.model_url:
+            import urllib.request
+
+            checkpoints_dir = self.model_path.parent
+            checkpoints_dir.mkdir(parents=True, exist_ok=True)
+
+            tmp_path = checkpoints_dir / "downloaded_model.pth"
+            print(f"[INFO] Checkpoint not found locally, downloading from {self.model_url}...")
+
+            try:
+                urllib.request.urlretrieve(self.model_url, tmp_path)
+            except Exception as e:
+                raise RuntimeError(f"Failed to download model from {self.model_url}: {e}")
+
+            return tmp_path
+
+        raise FileNotFoundError(
+            f"Model checkpoint not found at {self.model_path} and no MODEL_URL provided."
+        )
+
     @validator("model_path")
-    def _expand_path(cls, p: Path) -> Path:  # noqa: N805
+    def _expand_path(cls, p: Path) -> Path:
         return p.expanduser().resolve()
 
 
-# single-point instantiation
 cfg = AppConfig()
