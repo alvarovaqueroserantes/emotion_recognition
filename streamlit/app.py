@@ -325,7 +325,6 @@ def video_mode_dashboard() -> None:
 
             hist, timeline, matrix, calculated_fps = _process_video(src_path, dst_path)
 
-            st.video(dst_path)
             st.markdown(video_download_link(dst_path.read_bytes(), f"processed_{file.name}"), unsafe_allow_html=True)
             os.unlink(src_path)
             os.unlink(dst_path)
