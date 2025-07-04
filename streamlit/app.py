@@ -250,8 +250,13 @@ def main() -> None:
 # ====================================================================
 def image_mode_dashboard() -> None:
     st.header("Single Image Emotion Analysis")
-    file = st.file_uploader("Upload an image (JPG, JPEG, PNG)", type=["jpg", "jpeg", "png"], key="image_uploader")
-    
+
+    file = st.file_uploader(
+        "Upload an image (JPG, JPEG, PNG)", 
+        type=["jpg", "jpeg", "png"], 
+        key="image_uploader"
+    )
+
     if file:
         if file.size > 10 * 1024 * 1024:
             st.error("Image too large (max 10 MB). Please upload a smaller image.")
@@ -262,12 +267,27 @@ def image_mode_dashboard() -> None:
         st.session_state["sentiment_current_image"] = 0.0
         return
 
+    # process
     if st.session_state.get("process_triggered"):
         with st.spinner("Analyzing image..."):
             bgr = cv2.cvtColor(np.array(Image.open(file)), cv2.COLOR_RGB2BGR)
             detections = detector.detect(bgr)
             rgb_preview = cv2.cvtColor(detector.draw(bgr, detections), cv2.COLOR_BGR2RGB)
-            st.image(rgb_preview, use_container_width=True, caption=f"Detected faces in {file.name}")
+
+            # store image in session to persist
+            st.session_state["last_processed_image"] = rgb_preview
+
+            with st.container(border=True, height=450):
+                st.markdown("""
+                    <style>
+                    div[data-testid="stImage"] img {
+                        width: 100% !important;
+                        height: 100% !important;
+                        object-fit: contain;
+                    }
+                    </style>
+                    """, unsafe_allow_html=True)
+                st.image(rgb_preview, caption=f"Detected faces in {file.name}")
 
             if not detections:
                 st.warning("No faces detected in the uploaded image.")
@@ -280,31 +300,43 @@ def image_mode_dashboard() -> None:
                 history[det.label] += 1
                 with st.expander(f"{det.label} ({det.confidence:.0%})"):
                     st_pyecharts(emotion_bar(dict(zip(cfg.emotion_labels, det.probabilities))), height="320px")
-            
+
             st.session_state["metrics_current_image"] = history
             st.session_state["sentiment_current_image"] = calculate_sentiment(history)
 
-        col1, col2, col3 = st.columns([1, 1, 1])
+        col1, col2, col3 = st.columns(3)
         with col1:
-            st_pyecharts(emotion_pie(
-                {e: history.get(e, 0) / sum(history.values()) if sum(history.values()) > 0 else 0
-                 for e in cfg.emotion_labels}), height="350px")
+            st_pyecharts(
+                emotion_pie({
+                    e: history.get(e, 0) / sum(history.values()) if sum(history.values()) > 0 else 0
+                    for e in cfg.emotion_labels
+                }),
+                height="350px"
+            )
         with col2:
-            st_pyecharts(emotion_radar(
-                {e: history.get(e, 0) / sum(history.values()) if sum(history.values()) > 0 else 0
-                 for e in cfg.emotion_labels}), height="350px")
+            st_pyecharts(
+                emotion_radar({
+                    e: history.get(e, 0) / sum(history.values()) if sum(history.values()) > 0 else 0
+                    for e in cfg.emotion_labels
+                }),
+                height="350px"
+            )
         with col3:
-            st_pyecharts(sentiment_gauge(st.session_state["sentiment_current_image"]), height="350px")
+            st_pyecharts(
+                sentiment_gauge(st.session_state["sentiment_current_image"]),
+                height="350px"
+            )
 
         st.session_state["all_metrics"].extend(
-            {"source": file.name, "emotion": e, "count": c} for e, c in history.items()
+            {"source": file.name, "emotion": e, "count": c} 
+            for e, c in history.items()
         )
         st.session_state["timeline"] = [history]
-    
+
+    # show persisted image if available
     elif "last_processed_image" in st.session_state:
         with st.container(border=True, height=450):
-            st.markdown(
-                """
+            st.markdown("""
                 <style>
                 div[data-testid="stImage"] img {
                     width: 100% !important;
@@ -312,10 +344,12 @@ def image_mode_dashboard() -> None:
                     object-fit: contain;
                 }
                 </style>
-                """,
-                unsafe_allow_html=True
+                """, unsafe_allow_html=True)
+            st.image(
+                st.session_state["last_processed_image"],
+                caption="Last processed image (session cached)"
             )
-            st.image(st.session_state["last_processed_image"], caption="Last processed image (session cached)")
+
 # ====================================================================
 # VIDEO MODE DASHBOARD
 # ====================================================================
