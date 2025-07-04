@@ -267,7 +267,22 @@ def image_mode_dashboard() -> None:
             bgr = cv2.cvtColor(np.array(Image.open(file)), cv2.COLOR_RGB2BGR)
             detections = detector.detect(bgr)
             rgb_preview = cv2.cvtColor(detector.draw(bgr, detections), cv2.COLOR_BGR2RGB)
-            st.image(rgb_preview, use_container_width=True, caption=f"Detected faces in {file.name}")
+            
+            # Ajustar el contenedor para mantener altura constante
+            with st.container(border=True, height=450):
+                st.markdown(
+                    """
+                    <style>
+                    div[data-testid="stImage"] img {
+                        width: 100% !important;
+                        height: 100% !important;
+                        object-fit: contain;
+                    }
+                    </style>
+                    """,
+                    unsafe_allow_html=True
+                )
+                st.image(rgb_preview, caption=f"Detected faces in {file.name}")
 
             if not detections:
                 st.warning("No faces detected in the uploaded image.")
