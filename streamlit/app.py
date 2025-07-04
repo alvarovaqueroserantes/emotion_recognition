@@ -47,26 +47,27 @@ from viz import (
 )
 
 # ────────── UI bootstrapping ─────────────────────────────────────────
-import base64
+svg_data = """
+<svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='black'>
+  <path stroke-linecap='round' stroke-linejoin='round' d='M15.182 15.182a4.5 4.5 0 0 1-6.364 0M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM9.75 9.75c0 .414-.168.75-.375.75S9 10.164 9 9.75 9.168 9 9.375 9s.375.336.375.75Zm-.375 0h.008v.015h-.008V9.75Zm5.625 0c0 .414-.168.75-.375.75s-.375-.336-.375-.75.168-.75.375-.75.375.336.375.75Zm-.375 0h.008v.015h-.008V9.75Z'/>
+</svg>
+"""
 
-# convert png to base64
-with open(r"icons/pensamiento-positivo.png", "rb") as f:
-    encoded = base64.b64encode(f.read()).decode()
+# remove line breaks
+svg_data_uri = f"data:image/svg+xml;utf8,{svg_data.strip().replace('\"', '\'').replace(chr(10), '')}"
 
-favicon_data_url = f"data:image/png;base64,{encoded}"
-
-# set page config (with fallback)
+# set page config (fallback)
 st.set_page_config(
     page_title="EmotionSense Analytics",
     layout="wide",
     page_icon=":chart_with_upwards_trend:",  # fallback emoji
 )
 
-# override favicon
+# override favicon with inline SVG
 st.markdown(
     f"""
     <head>
-      <link rel="icon" type="image/png" href="{favicon_data_url}">
+      <link rel="icon" type="image/svg+xml" href="{svg_data_uri}">
     </head>
     """,
     unsafe_allow_html=True,
@@ -74,6 +75,7 @@ st.markdown(
 
 # then theme
 st.markdown(build_theme(cfg.palette), unsafe_allow_html=True)
+
 
 
 # ────────── detector (cached) ───────────────────────────────────────
