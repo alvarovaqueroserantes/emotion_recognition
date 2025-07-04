@@ -47,7 +47,22 @@ from viz import (
 )
 
 # ────────── UI bootstrapping ─────────────────────────────────────────
-st.set_page_config(page_title="EmotionSense Analytics", layout="wide", page_icon=":chart_with_upwards_trend:")
+st.set_page_config(
+    page_title="EmotionSense Analytics",
+    layout="wide",
+    page_icon=":chart_with_upwards_trend:",  # solo fallback
+)
+
+# Override favicon with custom PNG
+favicon_path = "icons/pensamiento-positivo.png"
+st.markdown(
+    f"""
+    <head>
+      <link rel="icon" type="image/png" href="{favicon_path}">
+    </head>
+    """,
+    unsafe_allow_html=True,
+)
 st.markdown(build_theme(cfg.palette), unsafe_allow_html=True) # Ensure palette is dict for styles.py
 
 
