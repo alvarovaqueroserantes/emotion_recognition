@@ -201,47 +201,14 @@ def main() -> None:
                         else:
                             st.warning("No metrics available yet — run an analysis first.")
 
-            with mui.Paper(
-                key="main_content_area",
-                sx={
-                    "p": 2,
-                    "borderRadius": "16px",
-                    "boxShadow": "0 4px 12px rgba(0,0,0,0.05)",
-                    "overflow": "auto",
-                    "minHeight": "300px"
-                },
-            ):
+            with mui.Paper(key="main_content_area", sx={"p": 2, "borderRadius": "16px", "boxShadow": "0 4px 12px rgba(0,0,0,0.05)", "overflowY": "auto"}):
+                # Dynamically render content based on selected mode
                 if analysis_mode == "🖼️ Image Analysis":
-                    # solo renderizar si hay archivo cargado
-                    if st.session_state.get("metrics_current_image"):
-                        image_mode_dashboard()
-                    else:
-                        st.markdown(
-                            "<div style='text-align:center; color:gray;'>"
-                            "No image selected yet. Please upload and process one."
-                            "</div>",
-                            unsafe_allow_html=True
-                        )
+                    image_mode_dashboard()
                 elif analysis_mode == "🎥 Video Analysis":
-                    if st.session_state.get("video_hist"):
-                        video_mode_dashboard()
-                    else:
-                        st.markdown(
-                            "<div style='text-align:center; color:gray;'>"
-                            "No video analyzed yet. Please upload and process one."
-                            "</div>",
-                            unsafe_allow_html=True
-                        )
-                else:  # Overall Performance
-                    if st.session_state.get("all_metrics"):
-                        performance_mode_dashboard()
-                    else:
-                        st.markdown(
-                            "<div style='text-align:center; color:gray;'>"
-                            "No analysis data available yet."
-                            "</div>",
-                            unsafe_allow_html=True
-                        )
+                    video_mode_dashboard()
+                else: # "📊 Overall Performance"
+                    performance_mode_dashboard()
     
     # Handle report download outside the elements context for standard Streamlit behavior
     # This ensures Streamlit's native download button works correctly
