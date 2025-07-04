@@ -47,22 +47,33 @@ from viz import (
 )
 
 # ────────── UI bootstrapping ─────────────────────────────────────────
+import base64
+
+# convert png to base64
+with open("icons/pensamiento-positivo.png", "rb") as f:
+    encoded = base64.b64encode(f.read()).decode()
+
+favicon_data_url = f"data:image/png;base64,{encoded}"
+
+# set page config (with fallback)
 st.set_page_config(
     page_title="EmotionSense Analytics",
     layout="wide",
+    page_icon=":chart_with_upwards_trend:",  # fallback emoji
 )
 
-# Override favicon with custom PNG
-favicon_path = "icons/pensamiento-positivo.png"
+# override favicon
 st.markdown(
     f"""
     <head>
-      <link rel="icon" type="image/png" href="{favicon_path}">
+      <link rel="icon" type="image/png" href="{favicon_data_url}">
     </head>
     """,
     unsafe_allow_html=True,
 )
-st.markdown(build_theme(cfg.palette), unsafe_allow_html=True) # Ensure palette is dict for styles.py
+
+# then theme
+st.markdown(build_theme(cfg.palette), unsafe_allow_html=True)
 
 
 # ────────── detector (cached) ───────────────────────────────────────
