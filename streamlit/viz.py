@@ -499,7 +499,7 @@ def transition_heatmap(matrix: np.ndarray, c: AppConfig = cfg) -> HeatMap:
 
 
 
-def emotion_timeline(timeline: list, c: AppConfig = cfg) -> Timeline:
+def emotion_timeline(timeline: list, c: AppConfig = cfg, play_interval: int = 50) -> Timeline:
     tl = Timeline(init_opts=_init())
 
     if not timeline:
@@ -518,7 +518,7 @@ def emotion_timeline(timeline: list, c: AppConfig = cfg) -> Timeline:
         tl.add(empty_chart, "No data")
         return tl
 
-    sample_interval = 1  # no skip, todos los frames
+    sample_interval = 1
 
     for i in range(0, len(timeline), sample_interval):
         frame_data = timeline[i]
@@ -570,12 +570,13 @@ def emotion_timeline(timeline: list, c: AppConfig = cfg) -> Timeline:
         tl.add(chart, f"Frame {i}")
 
     tl.add_schema(
-        play_interval=50,  # milisegundos (200 ms = 5 fps)
+        play_interval=play_interval,  # variable configurable
         is_auto_play=True,
         is_loop_play=True,
         control_position="bottom"
     )
     return tl
+
 
 
 
