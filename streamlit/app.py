@@ -313,7 +313,20 @@ def video_mode_dashboard() -> None:
         return
     
     st.session_state["last_video_name"] = file.name
-    st.video(file)
+    with st.container(border=True, height=400):
+        st.markdown(
+            """
+            <style>
+            video {
+                width: 100% !important;
+                height: 100% !important;
+                object-fit: contain;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True
+        )
+        st.video(file)
 
     if st.session_state.get("process_triggered"):
         with st.status("Processing video, please wait...", expanded=True):
