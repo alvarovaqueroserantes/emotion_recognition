@@ -252,8 +252,8 @@ def image_mode_dashboard() -> None:
     st.header("Single Image Emotion Analysis")
 
     file = st.file_uploader(
-        "Upload an image (JPG, JPEG, PNG)", 
-        type=["jpg", "jpeg", "png"], 
+        "Upload an image (JPG, JPEG, PNG)",
+        type=["jpg", "jpeg", "png"],
         key="image_uploader"
     )
 
@@ -267,14 +267,13 @@ def image_mode_dashboard() -> None:
         st.session_state["sentiment_current_image"] = 0.0
         return
 
-    # process
     if st.session_state.get("process_triggered"):
         with st.spinner("Analyzing image..."):
             bgr = cv2.cvtColor(np.array(Image.open(file)), cv2.COLOR_RGB2BGR)
             detections = detector.detect(bgr)
             rgb_preview = cv2.cvtColor(detector.draw(bgr, detections), cv2.COLOR_BGR2RGB)
 
-            # store image in session to persist
+            # persist processed image
             st.session_state["last_processed_image"] = rgb_preview
 
             with st.container(border=True, height=450):
@@ -295,46 +294,22 @@ def image_mode_dashboard() -> None:
                 st.session_state["sentiment_current_image"] = 0.0
                 return
 
+            # persist metrics
             history = defaultdict(int)
             for det in detections:
                 history[det.label] += 1
                 with st.expander(f"{det.label} ({det.confidence:.0%})"):
-                    st_pyecharts(emotion_bar(dict(zip(cfg.emotion_labels, det.probabilities))), height="320px")
-
-            st.session_state["metrics_current_image"] = history
+                    st_pyecharts(emotion_bar(dict(zip(cfg.emotion_labels, det.probabilities))), height=320)
+            st.session_state["history_current_image"] = history
             st.session_state["sentiment_current_image"] = calculate_sentiment(history)
 
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st_pyecharts(
-                emotion_pie({
-                    e: history.get(e, 0) / sum(history.values()) if sum(history.values()) > 0 else 0
-                    for e in cfg.emotion_labels
-                }),
-                height="350px"
+            st.session_state["all_metrics"].extend(
+                {"source": file.name, "emotion": e, "count": c} for e, c in history.items()
             )
-        with col2:
-            st_pyecharts(
-                emotion_radar({
-                    e: history.get(e, 0) / sum(history.values()) if sum(history.values()) > 0 else 0
-                    for e in cfg.emotion_labels
-                }),
-                height="350px"
-            )
-        with col3:
-            st_pyecharts(
-                sentiment_gauge(st.session_state["sentiment_current_image"]),
-                height="350px"
-            )
+            st.session_state["timeline"] = [history]
 
-        st.session_state["all_metrics"].extend(
-            {"source": file.name, "emotion": e, "count": c} 
-            for e, c in history.items()
-        )
-        st.session_state["timeline"] = [history]
-
-    # show persisted image if available
-    elif "last_processed_image" in st.session_state:
+    # in any case, if there is a persisted image, render again
+    if "last_processed_image" in st.session_state:
         with st.container(border=True, height=450):
             st.markdown("""
                 <style>
@@ -350,6 +325,31 @@ def image_mode_dashboard() -> None:
                 caption="Last processed image (session cached)"
             )
 
+        # ALSO render persisted charts if metrics exist
+        history = st.session_state.get("history_current_image")
+        if history:
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st_pyecharts(
+                    emotion_pie({
+                        e: history.get(e, 0) / sum(history.values()) if sum(history.values()) > 0 else 0
+                        for e in cfg.emotion_labels
+                    }),
+                    height=350
+                )
+            with col2:
+                st_pyecharts(
+                    emotion_radar({
+                        e: history.get(e, 0) / sum(history.values()) if sum(history.values()) > 0 else 0
+                        for e in cfg.emotion_labels
+                    }),
+                    height=350
+                )
+            with col3:
+                st_pyecharts(
+                    sentiment_gauge(st.session_state.get("sentiment_current_image", 0.0)),
+                    height=350
+                )
 # ====================================================================
 # VIDEO MODE DASHBOARD
 # ====================================================================
