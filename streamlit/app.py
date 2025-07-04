@@ -252,7 +252,11 @@ def image_mode_dashboard() -> None:
     st.header("Single Image Emotion Analysis")
     file = st.file_uploader("Upload an image (JPG, JPEG, PNG)", type=["jpg", "jpeg", "png"], key="image_uploader")
     
-    if not file:
+    if file:
+        if file.size > 10 * 1024 * 1024:
+            st.error("Image too large (max 10 MB). Please upload a smaller image.")
+            return
+    else:
         st.info("Please upload an image to begin the analysis. Click 'Process Media' after uploading.")
         st.session_state["metrics_current_image"] = defaultdict(int)
         st.session_state["sentiment_current_image"] = 0.0
@@ -263,7 +267,6 @@ def image_mode_dashboard() -> None:
             bgr = cv2.cvtColor(np.array(Image.open(file)), cv2.COLOR_RGB2BGR)
             detections = detector.detect(bgr)
             rgb_preview = cv2.cvtColor(detector.draw(bgr, detections), cv2.COLOR_BGR2RGB)
-            
             st.image(rgb_preview, use_container_width=True, caption=f"Detected faces in {file.name}")
 
             if not detections:
@@ -305,7 +308,11 @@ def video_mode_dashboard() -> None:
     st.header("Video Emotion Analysis")
     file = st.file_uploader("Upload a video (MP4, AVI, MOV)", type=["mp4", "avi", "mov"], key="video_uploader")
     
-    if not file:
+    if file:
+        if file.size > 100 * 1024 * 1024:
+            st.error("Video too large (max 100 MB). Please upload a smaller video.")
+            return
+    else:
         st.info("Please upload a video to begin the analysis.")
         st.session_state["video_hist"] = defaultdict(int)
         st.session_state["video_timeline"] = []
@@ -317,6 +324,12 @@ def video_mode_dashboard() -> None:
         st.markdown(
             """
             <style>
+            div[data-testid="stVideo"] {
+                width: 100% !important;
+                height: 100% !important;
+                overflow: hidden;
+                position: relative;
+            }
             video {
                 width: 100% !important;
                 height: 100% !important;
