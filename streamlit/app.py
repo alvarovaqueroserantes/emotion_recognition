@@ -171,10 +171,11 @@ def main() -> None:
                         help="Faces detected with a probability below this threshold are ignored."
                     )
                     st.divider()
-                    if st.button("Process Media", type="primary", use_container_width=True):
-                        st.session_state["process_triggered"] = True
-                    else:
-                        st.session_state["process_triggered"] = False
+                    if analysis_mode != "📊 Overall Performance":
+                        if st.button("Process Media", type="primary", use_container_width=True):
+                            st.session_state["process_triggered"] = True
+                        else:
+                            st.session_state["process_triggered"] = False
 
                     st.divider()
                     mui.CardHeader(title="Data Export", sx={"textAlign": "center"})
@@ -583,18 +584,6 @@ def performance_mode_dashboard() -> None:
     st.markdown("### Overall Sentiment Score")
     overall_sentiment_score = calculate_sentiment(df.groupby("emotion")["count"].sum().to_dict())
     st_pyecharts(sentiment_gauge(overall_sentiment_score), height="300px")
-
-    st.markdown("---")
-    st.markdown("### Historical Emotion Timeline (Aggregated Video Data)")
-    # This timeline specifically uses the 'timeline' stored from the last video analysis,
-    # or it could be an aggregation of *all* timelines if stored granularly.
-    # For simplicity, currently it re-uses the last video's timeline or is empty for image-only sessions.
-    # If a user processes multiple videos, you might need to combine their timelines here.
-    if st.session_state.get("timeline"):
-        st_pyecharts(rolling_share_line(st.session_state["timeline"], window=60), height="480px")
-    else:
-        st.info("No video timeline data available for historical view.")
-
 
     st.markdown("---")
     st.markdown("### Model & System Information")
