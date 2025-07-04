@@ -50,7 +50,6 @@ from viz import (
 st.set_page_config(
     page_title="EmotionSense Analytics",
     layout="wide",
-    page_icon=":chart_with_upwards_trend:",  # solo fallback
 )
 
 # Override favicon with custom PNG
