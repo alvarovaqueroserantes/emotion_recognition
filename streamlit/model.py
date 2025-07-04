@@ -2,16 +2,13 @@
 Model factory with:
 
 • ResNet-variant autoselection (18/34/50/101) from checkpoint keys
-• Local-file first, optional `cfg.model_url` fallback (HF Hub, S3, etc.)
-• Automatic CUDA half-precision (`cfg.half_precision`)
-• Synthetic warm-up + FPS benchmark (`cfg.batch_size`)
+• Local-file first, optional fallback download via AppConfig.resolved_model_path
+• Automatic CUDA half-precision (cfg.half_precision)
+• Synthetic warm-up + FPS benchmark (cfg.batch_size)
 """
 
 from __future__ import annotations
 
-import hashlib
-import subprocess
-import sys
 from contextlib import nullcontext
 from pathlib import Path
 from time import perf_counter
@@ -19,40 +16,12 @@ from typing import Dict, Tuple
 
 import torch
 from torch import nn
-from torchvision import models, transforms
+from torchvision import models
 
 from config import cfg, AppConfig
 
 # ------------------------------------------------------------------- #
-# I.  download helpers (only used if file missing)
-# ------------------------------------------------------------------- #
-def _download(url: str, dst: Path) -> None:
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    print(f"[EmotionSense] downloading checkpoint from {url}")
-    try:
-        import requests
-    except ModuleNotFoundError:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "requests"])
-        import requests  # type: ignore
-
-    with requests.get(url, stream=True, timeout=60) as r:
-        r.raise_for_status()
-        with open(dst, "wb") as f:
-            for chunk in r.iter_content(chunk_size=8192):
-                f.write(chunk)
-    print("[EmotionSense] download complete")
-
-
-def _ensure_weights(path: Path, url: str | None) -> None:
-    if path.exists():
-        return
-    if url is None:
-        raise FileNotFoundError(f"Checkpoint not found at {path} and no model_url set.")
-    _download(url, path)
-
-
-# ------------------------------------------------------------------- #
-# II.  model introspection utils
+# I.  model introspection utils
 # ------------------------------------------------------------------- #
 def _strip_module(state: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
     return {k.replace("module.", ""): v for k, v in state.items()}
@@ -80,13 +49,13 @@ def _build_resnet(variant: str, num_classes: int) -> nn.Module:
 
 
 # ------------------------------------------------------------------- #
-# III.  public loader
+# II.  public loader
 # ------------------------------------------------------------------- #
 def load_emotion_model(settings: AppConfig = cfg) -> Tuple[nn.Module, torch.device]:
-    _ensure_weights(settings.resolved_model_path, settings.model_url)
+    ckpt_path = settings.resolved_model_path
     device = torch.device("cuda" if settings.gpu and torch.cuda.is_available() else "cpu")
 
-    ckpt = torch.load(settings.resolved_model_path, map_location="cpu")
+    ckpt = torch.load(ckpt_path, map_location="cpu")
     if isinstance(ckpt, dict) and "model_state" in ckpt:
         ckpt = ckpt["model_state"]
     ckpt = _strip_module(ckpt)
@@ -103,7 +72,7 @@ def load_emotion_model(settings: AppConfig = cfg) -> Tuple[nn.Module, torch.devi
 
     model.to(device)
     if settings.half_precision and device.type == "cuda":
-        model.half()  # convert to fp16 weights
+        model.half()
         amp_ctx = torch.cuda.amp.autocast
     else:
         amp_ctx = nullcontext
@@ -115,12 +84,13 @@ def load_emotion_model(settings: AppConfig = cfg) -> Tuple[nn.Module, torch.devi
         dummy = dummy.half()
 
     with torch.no_grad(), amp_ctx():
-        # first call compiles GPU kernels
         _ = model(dummy)
-        torch.cuda.synchronize() if device.type == "cuda" else None
+        if device.type == "cuda":
+            torch.cuda.synchronize()
         t0 = perf_counter()
         _ = model(dummy)
-        torch.cuda.synchronize() if device.type == "cuda" else None
+        if device.type == "cuda":
+            torch.cuda.synchronize()
         fps = bs / (perf_counter() - t0)
     print(f"[EmotionSense] warm-up complete ⇒ {fps:.1f} inferences/sec (batch={bs})")
 
@@ -129,16 +99,15 @@ def load_emotion_model(settings: AppConfig = cfg) -> Tuple[nn.Module, torch.devi
 
 
 # ------------------------------------------------------------------- #
-# IV.  torchvision transform
+# III.  torchvision transform
 # ------------------------------------------------------------------- #
 from torchvision import transforms as T
 
 def build_transform(settings=cfg) -> T.Compose:
     s = settings.input_size
     return T.Compose([
-        T.Resize(int(s * 1.14)),   # keep aspect; 256→224 style
+        T.Resize(int(s * 1.14)),
         T.CenterCrop(s),
         T.ToTensor(),
         T.Normalize(mean=[0.5]*3, std=[0.5]*3),
     ])
-

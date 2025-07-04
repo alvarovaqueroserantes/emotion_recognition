@@ -78,15 +78,14 @@ class AppConfig(BaseSettings):
 
     # ----- model -----
     model_path: Path = Field(
-        default=Path(
-            r"..\checkpoints\emotion_model.pth"
-        ),
+        default=Path("./checkpoints/emotion_model.pth"),
         env="MODEL_PATH",
     )
     model_url: str | None = Field(
         default="https://drive.google.com/uc?export=download&id=1yGdQQsoskjAOG-IG9OoFS3K2aBWyVDcD",
         env="MODEL_URL",
     )
+
     batch_size: int = Field(8, gt=0, env="BATCH_SIZE")
     half_precision: bool = Field(False, env="HALF_PRECISION")
     gpu: bool = Field(default=torch.cuda.is_available(), env="USE_GPU")
@@ -136,26 +135,34 @@ class AppConfig(BaseSettings):
         if self.model_path.exists():
             return self.model_path
 
-        # fallback: download from Google Drive (converted link)
+        # fallback: download from Google Drive
         if self.model_url:
-            import urllib.request
-
             checkpoints_dir = self.model_path.parent
             checkpoints_dir.mkdir(parents=True, exist_ok=True)
 
-            tmp_path = checkpoints_dir / "downloaded_model.pth"
-            print(f"[INFO] Checkpoint not found locally, downloading from {self.model_url}...")
+            tmp_path = checkpoints_dir / "emotion_model.pth"
+            print(f"[EmotionSense] Checkpoint missing — downloading from {self.model_url}...")
 
+            # usar requests en lugar de urllib (más robusto)
             try:
-                urllib.request.urlretrieve(self.model_url, tmp_path)
-            except Exception as e:
-                raise RuntimeError(f"Failed to download model from {self.model_url}: {e}")
+                import requests
+            except ModuleNotFoundError:
+                import subprocess, sys
+                subprocess.check_call([sys.executable, "-m", "pip", "install", "requests"])
+                import requests
 
+            with requests.get(self.model_url, stream=True, timeout=60) as r:
+                r.raise_for_status()
+                with open(tmp_path, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        f.write(chunk)
+            print(f"[EmotionSense] Model checkpoint downloaded to {tmp_path}")
             return tmp_path
 
         raise FileNotFoundError(
             f"Model checkpoint not found at {self.model_path} and no MODEL_URL provided."
         )
+
 
     @validator("model_path")
     def _expand_path(cls, p: Path) -> Path:
